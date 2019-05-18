@@ -12,7 +12,7 @@
 #define SD_CARD_CS 13              //SD CARD Chip Select Pin
 
 File file;                         //Measurements File
-File root;
+
 
 void setup() {
   
@@ -22,13 +22,11 @@ void setup() {
   initializeSD();                  //Setup SD Card
   SD.remove("measure.txt");
   createFile("measure.txt");
-  writeToFile("Wow 1 2 3");
-  writeToFile("Hello");
+  writeToFile("Wowwwqw");
+  writeToFile("Hellow");
   closeFile();
 
-  root = SD.open("/");
 
-  printDirectory(root, 0);
   
   // Read Measurements from SD Card
   openFile("measure.txt");
