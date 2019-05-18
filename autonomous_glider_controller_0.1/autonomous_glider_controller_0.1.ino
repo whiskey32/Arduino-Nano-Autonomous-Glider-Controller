@@ -1,55 +1,69 @@
-// Autonomous Glider Controller for Arduino Nano
+/* 
+Arduino NANO: Autonomous Glider Controller
+
+ This code shows how to measure five inputs from the analog sensor pins. Namely, GPS coordinates, IMU (Gyro) data, Pitot Tube Airspeed data, 
+ elevator pwm output signal and rudder pwm output signal. 
+ All of the measuerd data is stored in the measure.txt file found on the SD card. Longitudanal and Lateral controllers are designed, 
+ tested and optimized in MATLAB. These negative control loop controllers are added in the loop to fly the glider from a high altitude 
+ weather balloon release to a desired landing field GPS-coordinate. PWM output signals with different duty cycles are generated 
+ and fed back to the elevator and rudder to keep the glider stable and on track.
+ 
 // Created: BJGW DU PLESSIS
 // Student Number: 18989780 
 // Modified: 2019/05/18
 // Version: 0.1
 
+*/
+
 #include "Arduino.h"
 #include <SD.h>
 #include <SPI.h>
 
+// SD CARD Chip Select Pin
+#define SD_CARD_CS 13
 
-#define SD_CARD_CS 13              //SD CARD Chip Select Pin
+// Measurements File
+File file;                         
 
-File file;                         //Measurements File
-
-
+//|| Setup File
 void setup() {
   
-  Serial.begin(115200);            //Setup Serial
+  // Setup Serial
+  Serial.begin(115200);            
 
-  // Save Measurements to SD Card
-  initializeSD();                  //Setup SD Card
+  //| Save Measurements to SD Card
+  initializeSD(); 
+  // clear current file                 
   SD.remove("measure.txt");
+  // create new file
   createFile("measure.txt");
-  writeToFile("Wowwwqw");
-  writeToFile("Hellow");
+  // write to file data
+  writeToFile("Just DO IT");
+  writeToFile("Nike");
   closeFile();
-
-
-  
-  // Read Measurements from SD Card
+  // read measurements from SD Card
   openFile("measure.txt");
   Serial.println(readLine());
+  //read second line
   Serial.println(readLine());
   closeFile();
-  
 
 
+  //| Take measurements
 }
 
+//|| Main Control Loop
 void loop() {
   
   // put your main code here, to run repeatedly:
 
 }
 
+//|| Other Functions/Loops
 
-// SD Card Functions
-
-// Main Function to Write Measurements to SD Card 
-int writeToFile(char text[])      
-{
+//| Save Measurements
+//Main loop to write measurements to SD card 
+int writeToFile(char text[])      {
   if (file)
   {
     file.println(text);
@@ -62,12 +76,12 @@ int writeToFile(char text[])
     return 0;
   }
 }
-
+// Setup and initialise SD Card to CS_pin = 13
 void initializeSD() {
-
   Serial.println("Initializing SD Card...");
-  pinMode(SD_CARD_CS, OUTPUT);                 //Set CS pin 13 as an output
-
+  
+  //Set CS pin 13 as an output
+  pinMode(SD_CARD_CS, OUTPUT);                 
    if (SD.begin())
   {
     Serial.println("SD card is ready to use.");
@@ -77,9 +91,8 @@ void initializeSD() {
     return;
   }
 }
-
-int createFile(char filename[])
-{
+// Create new file
+int createFile(char filename[]) {
   file = SD.open(filename, FILE_WRITE);
 
   if (file)
@@ -92,9 +105,8 @@ int createFile(char filename[])
     return 0;
   }
 }
-
-int openFile(char filename[])
-{
+// Open a file before read or write
+int openFile(char filename[]) {
   file = SD.open(filename);
   if (file)
   {
@@ -106,18 +118,16 @@ int openFile(char filename[])
     return 0;
   }
 }
-
-void closeFile()
-{
+// Close a file after read or write
+void closeFile() {
   if (file)
   {
     file.close();
     Serial.println("File closed");
   }
 }
-
-String readLine()
-{
+// Read one line of data
+String readLine() {
   String received = "";
   char ch;
   while (file.available())
@@ -135,8 +145,8 @@ String readLine()
   return "";
 }
 
-
-
+//| Take Measurements
+// Main loop to read measurements from analog pins
 
 
 
