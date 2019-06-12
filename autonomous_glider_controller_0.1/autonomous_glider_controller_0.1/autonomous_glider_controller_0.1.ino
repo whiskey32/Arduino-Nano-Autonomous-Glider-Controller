@@ -18,18 +18,32 @@
 #include "Arduino.h"
 #include <SD.h>
 #include <SPI.h>
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
 
 // SD CARD Chip Select Pin
 #define SD_CARD_CS 13
 
+// Software serial pins
+static const int RXPin = 9;
+static const int TXPin = 8;
+static const uint32_t GPSBaud = 9600;
+
+// The serial connection to the GPS module
+SoftwareSerial ss(TXPin, RXPin);
+
 // Measurements File
-File file;                         
+File file;   
+
+// The TinyGPS++ object
+TinyGPSPlus gps;
 
 //|| Setup File
 void setup() {
   
-  // Setup Serial
-  Serial.begin(115200);            
+  //| Setup Serial
+  Serial.begin(115200);   
+  ss.begin(GPSBaud);
 
   //| Save Measurements to SD Card
   initializeSD(); 
@@ -38,8 +52,8 @@ void setup() {
   // create new file
   createFile("measure.txt");
   // write to file data
-  writeToFile("Just DO IT");
-  writeToFile("Nike");
+  writeToFile("Let's Begin");
+  writeToFile("Adidas");
   closeFile();
   // read measurements from SD Card
   openFile("measure.txt");
@@ -50,13 +64,33 @@ void setup() {
 
 
   //| Take measurements
+
+  
 }
 
 //|| Main Control Loop
 void loop() {
-  
-  // put your main code here, to run repeatedly:
 
+//| GPS Data Request Loop
+  while (ss.available() > 0){
+    gps.encode(ss.read());
+    if (gps.location.isUpdated()){
+      Serial.print("Latitude= "); 
+      Serial.print(gps.location.lat(), 6);
+      Serial.print(" Longitude= "); 
+      Serial.println(gps.location.lng(), 6);
+  
+      // Altitude in meters (double)
+      Serial.print("Altitude in meters = "); 
+      Serial.println(gps.altitude.meters()); 
+     
+      // Number of satellites in use (u32)
+      Serial.print("Number os satellites in use = "); 
+      Serial.println(gps.satellites.value()); 
+
+    }
+  }
+  
 }
 
 //|| Other Functions/Loops
@@ -147,8 +181,3 @@ String readLine() {
 
 //| Take Measurements
 // Main loop to read measurements from analog pins
-
-
-
-
-
