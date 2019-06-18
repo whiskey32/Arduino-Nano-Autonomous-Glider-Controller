@@ -10,7 +10,7 @@
  
 // Created: BJGW DU PLESSIS
 // Student Number: 18989780 
-// Modified: 2019/05/18
+// Modified: 2019/06/18
 // Version: 0.1
 
 */
@@ -20,58 +20,95 @@
 #include <SPI.h>
 #include <SoftwareSerial.h>
 #include <TinyGPS++.h>
+#include <Wire.h>
 
-// SD CARD Chip Select Pin
+
+// SD CARD Chip Select Pin:
 #define SD_CARD_CS 13
 
-// Software serial pins
+// Airspeed Sensor Assigned I2C Address:
+#define airspeed_address 0x11 
+
+// Serial Pins for GPS:
 static const int RXPin = 9;
 static const int TXPin = 8;
-static const uint32_t GPSBaud = 9600;
+static const uint32_t GPSBaud = 9600;        // GPS Baud Rate
 
-// The serial connection to the GPS module
-SoftwareSerial ss(TXPin, RXPin);
+// Airspeed Variables:
+uint16_t current_airspeed;                   // Current Airspeed (km/h)
+byte buffer_airspeed[16];                    // Airspeed Sensor 16 Byte Buffer
+unsigned long previousMillis_airspeed = 0;   // Store last time airspeed was updated
+const long interval_airspeed = 250;          // Interval at which to update airspeed (milliseconds)
 
-// Measurements File
+// The serial connection to the GPS module:
+SoftwareSerial ss(TXPin, RXPin);      
+TinyGPSPlus gps;                             // The TinyGPS++ object:
+
+// Measurements File:
 File file;   
 
-// The TinyGPS++ object
-TinyGPSPlus gps;
-
-//|| Setup File
+//|| Setup Code:
 void setup() {
   
-  //| Setup Serial
-  Serial.begin(115200);   
-  ss.begin(GPSBaud);
+  //| Setup Serial:
+  Serial.begin(115200);   // Main Baud Rate
+  ss.begin(GPSBaud);      // Gps Baud Rate
+  Wire.begin();           // Join i2c Bus for Airspeed Measurements
+  SD.begin();             // Initializes the SD library and card 
 
-  //| Save Measurements to SD Card
-  initializeSD(); 
-  // clear current file                 
-  SD.remove("measure.txt");
-  // create new file
-  createFile("measure.txt");
-  // write to file data
-  writeToFile("Let's Begin");
-  writeToFile("Adidas");
-  closeFile();
-  // read measurements from SD Card
-  openFile("measure.txt");
-  Serial.println(readLine());
-  // read second line
-  Serial.println(readLine());
-  closeFile();
+  //| Save Measurements to SD Card:
+  pinMode(SD_CARD_CS, OUTPUT);                
+  SD.remove("measure.txt");                        // Clear Current File    
+  file = SD.open("measure.txt", FILE_WRITE);       // Create New File
 
-
-  //| Take measurements
 
   
 }
 
-//|| Main Control Loop
+//|| Main Control Loop:
 void loop() {
 
-//| GPS Data Request Loop
+  //| Take measurements:
+  //update_gps();
+  update_airspeed();
+  update_SD();
+  
+}
+
+//|| Other Functions/Loops
+
+// Write Measurements to SD card: 
+int writeToFile(char text[])      {
+  if (file)
+  {
+    file.println(text);
+    return 1;
+  } else
+  {
+    return 0;
+  }
+}
+
+// Open a file before read or write:
+int openFile(char filename[]) {
+  file = SD.open(filename);
+  if (file)
+  {
+    return 1;
+  } else
+  {
+    return 0;
+  }
+}
+
+
+
+//| Take Measurements:
+
+// GPS Data Request Loop:
+void update_gps() {
+
+
   while (ss.available() > 0){
     gps.encode(ss.read());
     if (gps.location.isUpdated()){
@@ -90,94 +127,45 @@ void loop() {
 
     }
   }
+}
+
+// Airspeed Data Request Loop:
+void update_airspeed() {
+
+  unsigned long currentMillis_airspeed  = millis();        // Number of milliseconds passed after airspeed update
   
-}
-
-//|| Other Functions/Loops
-
-//| Save Measurements
-// Main loop to write measurements to SD card 
-int writeToFile(char text[])      {
-  if (file)
-  {
-    file.println(text);
-    Serial.println("Writing to file: ");
-    Serial.println(text);
-    return 1;
-  } else
-  {
-    Serial.println("Couldn't write to file");
-    return 0;
-  }
-}
-// Setup and initialise SD Card to CS_pin = 13
-void initializeSD() {
-  Serial.println("Initializing SD Card...");
-  
-  // Set CS pin 13 as an output
-  pinMode(SD_CARD_CS, OUTPUT);                 
-   if (SD.begin())
-  {
-    Serial.println("SD card is ready to use.");
-  } else
-  {
-    Serial.println("SD card initialization failed");
-    return;
-  }
-}
-// Create new file
-int createFile(char filename[]) {
-  file = SD.open(filename, FILE_WRITE);
-
-  if (file)
-  {
-    Serial.println("File created successfully.");
-    return 1;
-  } else
-  {
-    Serial.println("Error while creating file.");
-    return 0;
-  }
-}
-// Open a file before read or write
-int openFile(char filename[]) {
-  file = SD.open(filename);
-  if (file)
-  {
-    Serial.println("File opened with success!");
-    return 1;
-  } else
-  {
-    Serial.println("Error opening file...");
-    return 0;
-  }
-}
-// Close a file after read or write
-void closeFile() {
-  if (file)
-  {
-    file.close();
-    Serial.println("File closed");
-  }
-}
-// Read one line of data
-String readLine() {
-  String received = "";
-  char ch;
-  while (file.available())
-  {
-    ch = file.read();
-    if (ch == '\n')
-    {
-      return String(received);
-    }
-    else
-    {
-      received += ch;
+  if (currentMillis_airspeed  - previousMillis_airspeed >= interval_airspeed ) {
+   
+      previousMillis_airspeed = currentMillis_airspeed;
+      Wire.requestFrom(airspeed_address,16);      // Request 16 bytes from Airspeed sensor
+      
+      while(Wire.available())  {
+          for (int i = 0; i <= 15; i++) {
+           buffer_airspeed[i] = Wire.read();      // Receive and store 16 bytes
     }
   }
-  return "";
+
+current_airspeed = buffer_airspeed[2]*256 + buffer_airspeed[3];      // Airspeed: MSB = Byte 2 & LSB = Byte 3  (1 km/h increments)
+//airspeed_current /= 3.6;                // Convert airspeed from km/h to m/s
+
+//Serial.println("Byte 0:");
+//Serial.println(buffer_airspeed[0], HEX);
+//Serial.println("Byte 2:"); 
+//Serial.println(buffer_airspeed[2], HEX);
+//Serial.println("Byte 3:"); 
+//Serial.println(buffer_airspeed[3], HEX);
+Serial.println("Airspeed");
+Serial.println(current_airspeed, DEC);
+}
 }
 
-//| Take Measurements
-// Main loop to read measurements from analog pins
+// Save Measurements to SD Card
+void update_SD() {
+
+  // write to file data
+  //openFile("measure.txt");
+  writeToFile("Hello");
+  file.close();                  // Close a file after read or write
+
+
+}
