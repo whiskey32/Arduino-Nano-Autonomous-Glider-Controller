@@ -1,86 +1,162 @@
 /*
   Arduino NANO: Autonomous Glider Controller
-
-  This code shows how to measure five inputs from the analog sensor pins. Namely, GPS data, IMU (Gyro) data, Pitot Tube Airspeed data
+  This code shows how to measure five inputs from the analog sensor pins. Namely, GPS data, IMU data, Pitot Tube Airspeed data
   , elevator - and rudder positions, which is related to the pwm output signal duty cycles.
   All of the measuerd data is stored in the measure.txt file found on the SD card. Longitudanal and Lateral controllers are designed,
   tested and optimized in MATLAB. These negative control loop controllers are added in the loop to fly the glider from a high altitude
   weather balloon release to a desired landing field GPS-coordinate. PWM output signals with different duty cycles are generated
   and fed back to the elevator and rudder to keep the glider stable and on track.
-
   // Created: BJGW DU PLESSIS
   // Student Number: 18989780
-  // Modified: 2019/06/24
-  // Version: 0.1
-
+  // Modified: 2019/07/22
+  // Version: 0.2
 */
 
+//   NOTE: Correct directions x,y,z - gyro, accelerometer, magnetometer
+// - X axis pointing forward
+// - Y axis pointing to the right
+// - and Z axis pointing down.
+// - Positive pitch : nose up
+// - Positive roll : right wing down
+// - Positive yaw : clockwise
 
 #include "Arduino.h"
-#include <SD.h>
+#include "SdFat.h"
 #include <SPI.h>
-#include <SoftwareSerial.h>
-#include <TinyGPS++.h>
+#include <NMEAGPS.h>
+#include <GPSport.h>
+#include <AltSoftSerial.h>
 #include <Wire.h>
+#include <LSM6.h>
+#include <LPS.h>
+#include <LIS3MDL.h>
 
+// GPS Port settings; AltSoftSerial gpsPort(8,9); 8 & 9 for Nano RX, TX
+#define GPS_PORT_NAME "AltSoftSerial"
+#define DEBUG_PORT Serial
+
+// IMU SETTINGS
+#define RAD_to_DEG (180 / PI)  // Convert from radians to degrees
+#define DEG_to_RAD (PI / 180)  // Convert from degrees to radians
+// #define filter_coef_a 0.1      // Complementary Filter Coefficient a
+// #define g_x_offset 2.46        // Gyroscope X axis offset(dps)
+// #define g_y_offset 1.71        // Gyroscope Y axis offset(dps)
+// #define g_z_offset -5.52       // Gyroscope Z axis offset(dps)
+// #define altimeter_setting_mbar 1019.1   // Stellenbosch QNH (mbar)
 
 // SD CARD Chip Select Pin:
-#define SD_CARD_CS 13
+// #define SD_CARD_CS 13
 
-// Airspeed Sensor Assigned I2C Address:
-#define airspeed_address 0x11
+// IMU Sensor Objects:
+LSM6 imu;                 // Accelerometer and Gyro Object
+LIS3MDL mag;              // Magnetometer Object
+LPS ps;                   // Pressure sensor Object
 
-// Serial Pins for GPS:
-static const int RXPin = 9;
-static const int TXPin = 8;
+// GPS VARIABLES  
+int32_t  gps_lat;                           // Latitude (signed degrees)
+int32_t  gps_long;                          // Longitude (signed degrees)
+int32_t  gps_h;                             // Time (Hours)
+int32_t  gps_m;                             // Time (Hours)
+int32_t  gps_s;                             // Time (Hours)
+int32_t  current_groundspeed;               // Groundspeed (km/h)
+int32_t  no_satellites;                     // Number of satellites
 
-// GPS VARIABLES
-uint32_t gps_date;                           // Raw Date (DDMMYY)
-uint32_t gps_time;                           // Raw time (HHMMSSCC)
-double   current_groundspeed;                // Groundspeed (km/h)
-double   gps_lat;                            // Latitude (degrees)
-double   gps_long;                           // Longitude (degrees)
-double   gps_alt;                            // Altitude (m)
-uint32_t no_satellites;                      // Number of sattellites
+// The serial connection to the GPS module:
+NMEAGPS gps;           // The NMEAGPS object:
+gps_fix fix;           // Data placeholder
 
+// IMU MODULE
+unsigned long previousMillis_imu = 0;   // Store last time airspeed was updated
+// Accelerometer Variables (LSM6DS33)
+float a_x;       // Accelerometer X axis reading (g)
+float a_y;       // Accelerometer Y axis reading (g)
+float a_z;       // Accelerometer Z axis reading (g)
+// float a_conversion_factor = 0.061;  // Conversion Factor for default full scale setting +/- 2 g
+
+// Gyroscope Variables (LSM6DS33)
+float g_x;       // Gyroscope X axis reading (dps)
+float g_y;       // Gyroscope Y axis reading (dps)
+float g_z;       // Gyroscope Z axis reading (dps)
+// float g_conversion_factor = 8.75;  // Conversion Factor for default full scale setting +/- 245 dps
+
+// Magnetometer Variables (LIS3MDL)
+float m_x;       // Magnetometer X axis reading (gauss)
+float m_y;       // Magnetometer Y axis reading (gauss)
+float m_z;       // Magnetometer Z axis reading (gauss)
+// float m_conversion_factor = 6842;  // Conversion Factor for default full scale setting +/- 4 gauss
+
+// CALIBRATION OF MAGNETOMETER
+typedef struct vector
+{
+  float x, y, z;
+} vector;
+
+// Code initialization statements from magneto program, compass correction bias and rotation matrix
+// scaled and rotated vectors will have norm ~ 1000 based on the example data (raw_mag_outside_balcony.csv)
+float B[3] = { 2190.35, -890.97, 5214.94};
+
+float Ainv[3][3] = {{  0.57770,  0.00003, -0.02842},
+  {  0.00003,  0.63829,  -0.00117},
+  { -0.02842,  -0.00117,  0.58583}
+};
+
+// Pressure Sensor Variables (LPS25H MEMS)
+float pressure;  // Pressure reading (mbar)
+float imu_altitude; // Inidicated altitude compensated for the actual regional pressure (m)
+
+// Aircraft ROTATIONS
+float a_pitch;   // Non filtered pitch derived from acceleration values (degrees)
+float a_roll;    // Non filtered roll derived from acceleration values  (degrees)
+unsigned long gyro_integration_timer_start = millis();
+float f_pitch = a_pitch;   // Filtered pitch (degrees/rad)
+float f_roll = a_roll;    // Filtered roll (degrees/rad)
+float yaw_x;   // Yaw in x direction derived from magnetometer, pitch and roll measurements
+float yaw_y;   // Yaw in y direction derived from magnetometer, pitch and roll measurements
+float yaw;     // Yaw derived from X, Y, Z magnetometer readings (degrees)
 
 // Airspeed Variables:
 uint16_t current_airspeed;                   // Current Airspeed (km/h)
 byte buffer_airspeed[16];                    // Airspeed Sensor 16 Byte Buffer
 unsigned long previousMillis_airspeed = 0;   // Store last time airspeed was updated
-const long interval_airspeed = 250;          // Interval at which to update airspeed (milliseconds)
+// const long interval_airspeed = 250;          // Interval at which to update airspeed (milliseconds)
 
-// The serial connection to the GPS module:
-SoftwareSerial ss(TXPin, RXPin);
-TinyGPSPlus gps;                             // The TinyGPS++ object:
+// file system
+SdFat sd;
 
-// Measurements File:
+// Measurements file
 File file;
+// File Format 
+// [hour, minute, second, Current Ground Speed (km/h), Current Airspeed Speed(km/h), Latitude (°), Longitude (°), satellites, pitch (degrees), roll (degrees), yaw (degrees), pressure (mbar), imu_altitude (m)]
 
 // Serial Command Variables:
 String command;           // Serial monitor command string buffer
 boolean SD_switch;        // Do not write to SD = 0; Write to SD = 1
-
-
-
 
 //|| Setup Code:
 void setup() {
 
   //| Setup Serial:
   Serial.begin(9600);     // Main Baud Rate
-  ss.begin(9600);         // Gps Baud Rate
+  gpsPort.begin(9600);    // Gps Baud Rate
   Wire.begin();           // Join i2c Bus for Airspeed Measurements
-  SD.begin();             // Initializes the SD library and card
+  sd.begin();             // Initializes the SD library and card
+
+  imu.init();
+  imu.enableDefault();
+  mag.init();
+  mag.enableDefault();
+  ps.init();
+  ps.enableDefault();
 
   //| Save Measurements to SD Card:
-  pinMode(SD_CARD_CS, OUTPUT);
-  SD.remove("measure.txt");                        // Clear Current File
+  pinMode(13, OUTPUT);
+  sd.remove("measure.txt");                        // Clear Current File
   SD_switch = 0;                                   // Do not write to SD
-  file = SD.open("measure.txt", FILE_WRITE);       // Create/Open measure file before read or write
-  file.println("Date (DDMMYY)|Time (HHMMSSCC)|Current Airspeed (km/h)|Current Ground Speed(km/h)|Latitude (°)|Longitude (°)|Altitude (m)|Participating Satellites|" );
-  file.close();                    // Close current file after read or write
+
+  
   Serial.println("Setup Complete");
+
+
 
 }
 
@@ -88,31 +164,71 @@ void setup() {
 void loop() {
 
   //| Read Serial Commands:
-  if (Serial.available()) {
-    command = Serial.readStringUntil('\n');
-    if (command.equals("$SD0")) {
-      SD_switch = 0;
-      Serial.println("SD OFF");
-    }
-    else if (command.equals("$SD1")) {
-      SD_switch = 1;
-      Serial.println("SD ON");
-    }
-    else {
-      Serial.println("Invalid Command");
-    }
+  // if (Serial.available()) {
+  //   command = Serial.readStringUntil('\n');
+  //   if (command.equals("$SD0")) {
+  //     SD_switch = 0;
+  //      Serial.println("SD OFF");
+  //    }
+  //    else if (command.equals("$SD1")) {
+  //      SD_switch = 1;
+  //     Serial.println("SD ON");
+  //   }
+  //   else {
+  //     Serial.println("Invalid Command");
+  //    }
+  //  }
+
+ file = sd.open("measure.txt", FILE_WRITE);  
+
+  if (file) {
+    //file.print("hello");
+  file.print(gps_h);
+  file.print(",");
+  file.print(gps_m);
+  file.print(",");
+  file.print(gps_s);
+  file.print(",");
+  file.print(current_groundspeed);
+  file.print(",");
+  file.print(current_airspeed);
+  file.print(",");
+  file.print(gps_lat, 6);
+  file.print(",");
+  file.print(gps_long, 6);
+  file.print(",");
+  file.print(no_satellites);
+  file.print(",");
+  file.print(f_pitch);
+  file.print(",");
+  file.print(f_roll);
+  file.print(",");
+  file.print(yaw);
+  file.print(",");
+  file.print(pressure);
+  file.print(",");
+  file.print(imu_altitude);
+  file.print(",");
+  file.println();
+  file.close();
+    
+    
   }
 
+
+//  SD_switch = 1;
   // Start saving measurements if SD = ON:
-  if (SD_switch == 1) {        //**** Add OR in while function when Multiplexer switched
-    file = SD.open("measure.txt", FILE_WRITE);
-    update_SD();
-    //Serial.println("SD Updated ");
-  }
+ // if (SD_switch == 1) {        //**** Add OR in while function when Multiplexer switched
+    
+  //  update_SD();
+    // Serial.println("SD Updated ");
+ // }
 
 
   update_airspeed();
+  update_imu();
   update_gps();
+
 
 }
 
@@ -120,22 +236,78 @@ void loop() {
 
 //| Take Measurements:
 
-// GPS Data Request Loop:
-void update_gps() {
+// IMU Data Request Loop:
+void update_imu() {
 
-  while (ss.available() > 0) {
-    gps.encode(ss.read());
-    if (gps.location.isUpdated()) {
-      gps_date = gps.date.value();
-      gps_time = gps.time.value();
-      current_groundspeed = gps.speed.kmph();
-      gps_lat = gps.location.lat();
-      gps_long = gps.location.lng() ;
-      gps_alt = gps.altitude.meters();
-      no_satellites = gps.satellites.value() ;
-      //Serial.println("GPS Updated ");
-    }
-  }
+    imu.read();
+    mag.read();
+
+    // Read Accelerometer (g)
+    a_x =  (imu.a.x * 0.061) / 1000;
+    a_y =  (imu.a.y * 0.061) / 1000;
+    a_z =  (imu.a.z * 0.061) / 1000;
+
+    // Read Gyroscope and compensate for Gyro offset (dps)
+    g_x = ((imu.g.x * 8.75) / 1000) - 2.46;
+    g_y = ((imu.g.y * 8.75) / 1000) - 1.71;
+    g_z = ((imu.g.z * 8.75) / 1000) + 5.52;
+
+    // Read Pressure, Altitude and Temperature
+    pressure = ps.readPressureMillibars();
+    imu_altitude = ps.pressureToAltitudeMeters(pressure, 1019.1);
+
+    // Read Magnetometer and correct readings (gauss)
+    vector m;
+    read_data(&m);
+    m_x = m.x / 6842;
+    m_y = m.y / 6842;
+    m_z = m.z / 6842;
+
+    // Calculate non filtered pitch, roll and yaw (degrees)
+    a_pitch = atan2(a_x, sqrt(a_y * a_y + a_z * a_z)) * RAD_to_DEG;
+    a_roll = atan2(a_y, sqrt(a_x * a_x + a_z * a_z)) * RAD_to_DEG;
+
+    // Complementary Filter to surpress noise in accelerometer and gyroscope data (degrees)
+    unsigned long dt = (millis() - gyro_integration_timer_start) / 1000;
+    f_pitch = (1 - 0.1) * (f_pitch + dt * g_x) + 0.1 * a_pitch;
+    f_roll = (1 - 0.1) * (f_roll + dt * g_y) + 0.1 * a_roll;
+
+    // Start integration timer for gyro
+    gyro_integration_timer_start = 0;
+    gyro_integration_timer_start = millis();
+
+    // Convert filtered pitch and roll results to rad
+    f_pitch = f_pitch * DEG_to_RAD;
+    f_roll = f_roll * DEG_to_RAD;
+
+    // Calculate yaw from magnetometer. "Heading" (degrees from true North)
+    yaw_x = m_x * cos(f_pitch) + m_y * sin(f_roll) * sin(f_pitch) + m_z * cos(f_roll) * sin(f_pitch);
+    yaw_y = m_y * cos(f_roll) - m_z * sin(f_roll);
+    yaw =  atan2(yaw_y, yaw_x);
+
+    // Aircraft ROTATIONS
+    yaw = yaw * RAD_to_DEG;
+    if (yaw < 0 ) yaw = 360 - abs(yaw);
+    f_pitch = f_pitch * RAD_to_DEG;
+    f_roll = f_roll * RAD_to_DEG;
+
+    // Serial.println(yaw);
+
+  
+}
+
+// Returns a set of soft & hard distortion-corrected magnetic readings from the LIS3MDL
+void read_data(vector * m)
+{
+  static float x, y, z;
+  mag.read();
+  x = (float) mag.m.x - B[0];
+  y = (float) mag.m.y - B[1];
+  z = (float) mag.m.z - B[2];
+  m->x = Ainv[0][0] * x + Ainv[0][1] * y + Ainv[0][2] * z;
+  m->y = Ainv[1][0] * x + Ainv[1][1] * y + Ainv[1][2] * z;
+  m->z = Ainv[2][0] * x + Ainv[2][1] * y + Ainv[2][2] * z;
+
 }
 
 // Airspeed Data Request Loop:
@@ -143,10 +315,10 @@ void update_airspeed() {
 
   unsigned long currentMillis_airspeed  = millis();        // Number of milliseconds passed after airspeed update
 
-  if (currentMillis_airspeed  - previousMillis_airspeed >= interval_airspeed ) {
+  if (currentMillis_airspeed  - previousMillis_airspeed >= 150 ) {
 
     previousMillis_airspeed = currentMillis_airspeed;
-    Wire.requestFrom(airspeed_address, 16);     // Request 16 bytes from Airspeed sensor
+    Wire.requestFrom(0x11, 16);     // Request 16 bytes from Airspeed sensor
 
     while (Wire.available())  {
       for (int i = 0; i <= 15; i++) {
@@ -155,41 +327,33 @@ void update_airspeed() {
     }
 
     current_airspeed = buffer_airspeed[2] * 256 + buffer_airspeed[3];    // Airspeed: MSB = Byte 2 & LSB = Byte 3  (1 km/h increments)
-
-    //current_airspeed  /= 3.6;                // Convert airspeed from km/h to m/s
-
-    //Serial.println("Byte 0:");
-    //Serial.println(buffer_airspeed[0], HEX);
-    //Serial.println("Byte 2:");
-    //Serial.println(buffer_airspeed[2], HEX);
-    //Serial.println("Byte 3:");
-    //Serial.println(buffer_airspeed[3], HEX);
-    //Serial.println("Airspeed");
-    //Serial.println(current_airspeed, DEC);
+    //current_airspeed  /= 3.6;    // Convert airspeed from km/h to m/s
   }
+  // Serial.println(current_airspeed);
+}
+
+// GPS Data Request Loop:
+void update_gps() {
+
+  while (gps.available( gpsPort)) {
+    fix = gps.read();
+    if (fix.valid.location) {
+      gps_lat = fix.latitudeL();
+      gps_long = fix.longitudeL();
+    }
+    gps_h = fix.dateTime.hours;
+    gps_m = fix.dateTime.minutes;
+    gps_s = fix.dateTime.seconds;
+    current_groundspeed = (fix.speed_kph(), 6);
+    no_satellites = fix.satellites;
+  }
+ // Serial.println(gps_lat);
 }
 
 // Update and Save Measurements to SD Card:
-void update_SD() {
+//void update_SD() {
 
   // Write data to file
-  file.print(gps_date);
-  file.print("|");
-  file.print(gps_time);
-  file.print("|");
-  file.print(current_airspeed);
-  file.print("|");
-  file.print(current_groundspeed);
-  file.print("|");
-  file.print(gps_lat, 6);
-  file.print("|");
-  file.print(gps_long, 6);
-  file.print("|");
-  file.print(gps_alt);
-  file.print("|");
-  file.print(no_satellites);
-  file.print("|");
-  file.println();
-  file.close();
+ 
 
-}
+//}
