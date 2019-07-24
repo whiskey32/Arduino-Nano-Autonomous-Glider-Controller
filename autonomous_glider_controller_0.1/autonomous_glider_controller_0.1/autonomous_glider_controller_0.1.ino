@@ -8,8 +8,8 @@
   and fed back to the elevator and rudder to keep the glider stable and on track.
   // Created: BJGW DU PLESSIS
   // Student Number: 18989780
-  // Modified: 2019/07/22
-  // Version: 0.2
+  // Modified: 2019/07/24
+  // Version: 0.3
 */
 
 //   NOTE: Correct directions x,y,z - gyro, accelerometer, magnetometer
@@ -30,10 +30,11 @@
 #include <LSM6.h>
 #include <LPS.h>
 #include <LIS3MDL.h>
+// #include <ServoTimer2.h>
 
 // GPS Port settings; AltSoftSerial gpsPort(8,9); 8 & 9 for Nano RX, TX
-#define GPS_PORT_NAME "AltSoftSerial"
-#define DEBUG_PORT Serial
+//#define GPS_PORT_NAME "AltSoftSerial"
+//#define DEBUG_PORT Serial
 
 // IMU SETTINGS
 #define RAD_to_DEG (180 / PI)  // Convert from radians to degrees
@@ -47,12 +48,16 @@
 // SD CARD Chip Select Pin:
 // #define SD_CARD_CS 13
 
+// PWM Measure settings
+// #define OH_SHIT_SWITCH_IN_PIN 3 //  The PIN number in digitalRead
+// #define OH_SHIT_SWITCH_NEUTRAL 1508 // This is the duration in microseconds of a neutral position on RC plane
+
 // IMU Sensor Objects:
 LSM6 imu;                 // Accelerometer and Gyro Object
 LIS3MDL mag;              // Magnetometer Object
 LPS ps;                   // Pressure sensor Object
 
-// GPS VARIABLES  
+// GPS VARIABLES
 int32_t  gps_lat;                           // Latitude (signed degrees)
 int32_t  gps_long;                          // Longitude (signed degrees)
 int32_t  gps_h;                             // Time (Hours)
@@ -120,27 +125,38 @@ byte buffer_airspeed[16];                    // Airspeed Sensor 16 Byte Buffer
 unsigned long previousMillis_airspeed = 0;   // Store last time airspeed was updated
 // const long interval_airspeed = 250;          // Interval at which to update airspeed (milliseconds)
 
-// file system
+// PWM Signal Measure
+volatile int OH_SHIT_SWITCH_In = 0; // Oh shit switch PWM Value set to neutral PWM microseconds value TODO; Check neutral value
+volatile unsigned long pwm_prev_time = 0; // Previous time of pwm value
+volatile boolean b_OH_SHIT_SWITCH_Signal = false; // Set in the interrupt and read in the loop
+
+// PWM Signal Generation Servo Objects 
+// ServoTimer2 rudder;
+// ServoTimer2 elevator;
+
+// SD Card Object
 SdFat sd;
 
-// Measurements file
+// Measurements File Object
+// File Format: [hour, minute, second, Current Ground Speed (km/h), Current Airspeed Speed(km/h), Latitude (°), Longitude (°), satellites, pitch (degrees), roll (degrees), yaw (degrees), pressure (mbar), imu_altitude (m)]
 File file;
-// File Format 
-// [hour, minute, second, Current Ground Speed (km/h), Current Airspeed Speed(km/h), Latitude (°), Longitude (°), satellites, pitch (degrees), roll (degrees), yaw (degrees), pressure (mbar), imu_altitude (m)]
+boolean SD_switch;   // Do not write to SD = 0; Write to SD = 1
 
-// Serial Command Variables:
-String command;           // Serial monitor command string buffer
-boolean SD_switch;        // Do not write to SD = 0; Write to SD = 1
+// Flight Stage Variables
+int flight_stage;       // Flight stages determined from 0 to 5
+int flight_stage_flag;  // Flight stage flag that increments flight stage each time OH SHIT SWITCH is flipped
+
 
 //|| Setup Code:
 void setup() {
 
-  //| Setup Serial:
+  //| Setup Transmission Data Rates:
   Serial.begin(9600);     // Main Baud Rate
   gpsPort.begin(9600);    // Gps Baud Rate
   Wire.begin();           // Join i2c Bus for Airspeed Measurements
-  sd.begin();             // Initializes the SD library and card
-
+  sd.begin();             // Initializes the SD card for SPI communication
+  
+  //| Initialise IMU Sensors
   imu.init();
   imu.enableDefault();
   mag.init();
@@ -148,12 +164,22 @@ void setup() {
   ps.init();
   ps.enableDefault();
 
-  //| Save Measurements to SD Card:
+  //| Setup PWM Rudder, Elevator, Signal Select and OH SHIT SWITCH Connections
+  // rudder.attach(A1);     // Rudder PWM  Output. Pin A1
+  // elevator.attach(A2);   // Elevator PWM  Output. Pin A2
+  pinMode(4, OUTPUT);    // Sets digital pin 4 as Signal Select switch output signal
+  attachInterrupt(digitalPinToInterrupt(3), pwm_calc, CHANGE);  // Create interrupt for OH SHIT SWITCH
+
+  //| Setup Save Measurements to SD Card:
   pinMode(13, OUTPUT);
-  sd.remove("measure.txt");                        // Clear Current File
-  SD_switch = 0;                                   // Do not write to SD
+  // sd.remove("measure.txt");  // Clear Current File
+  SD_switch = 0;                // Do not write to SD
+
+  flight_stage = -1;      // Set initial flight stage to 0 after flight stage flag incremented it from -1 to 0
+  flight_stage_flag = 0;  // Set initial flight stage flag to 0
 
   
+
   Serial.println("Setup Complete");
 
 
@@ -163,71 +189,65 @@ void setup() {
 //|| Main Control Loop:
 void loop() {
 
-  //| Read Serial Commands:
-  // if (Serial.available()) {
-  //   command = Serial.readStringUntil('\n');
-  //   if (command.equals("$SD0")) {
-  //     SD_switch = 0;
-  //      Serial.println("SD OFF");
-  //    }
-  //    else if (command.equals("$SD1")) {
-  //      SD_switch = 1;
-  //     Serial.println("SD ON");
-  //   }
-  //   else {
-  //     Serial.println("Invalid Command");
-  //    }
-  //  }
+  // Create Rudder PWM signal for PWM measure test
+  // rudder.write(1508);
+  // elevator.write(1508);
 
- file = sd.open("measure.txt", FILE_WRITE);  
+  // MUX SIGNAL SELECT
+  digitalWrite(4, HIGH); // Signal select LOW = ARDUINO PWM Input; HIGH = ONBOARD RECEIVER PWM Input   *******************NB*************** For Measurments set to HIGH
 
-  if (file) {
-    //file.print("hello");
-  file.print(gps_h);
-  file.print(",");
-  file.print(gps_m);
-  file.print(",");
-  file.print(gps_s);
-  file.print(",");
-  file.print(current_groundspeed);
-  file.print(",");
-  file.print(current_airspeed);
-  file.print(",");
-  file.print(gps_lat, 6);
-  file.print(",");
-  file.print(gps_long, 6);
-  file.print(",");
-  file.print(no_satellites);
-  file.print(",");
-  file.print(f_pitch);
-  file.print(",");
-  file.print(f_roll);
-  file.print(",");
-  file.print(yaw);
-  file.print(",");
-  file.print(pressure);
-  file.print(",");
-  file.print(imu_altitude);
-  file.print(",");
-  file.println();
-  file.close();
-    
-    
+  Serial.println(OH_SHIT_SWITCH_In);
+  
+  if (b_OH_SHIT_SWITCH_Signal)
+  {
+    if ( OH_SHIT_SWITCH_In >= 1000 &&  OH_SHIT_SWITCH_In <= 3000)
+    {
+      //Serial.println(OH_SHIT_SWITCH_In);
+      SD_switch = 1;
+      flight_stage_flag = 0;
+      b_OH_SHIT_SWITCH_Signal = false; // Set switch back to false to recalculate next PWM duaration
+    }
+  
+  else {
+      SD_switch = 0;
+  }
   }
 
-
-//  SD_switch = 1;
-  // Start saving measurements if SD = ON:
- // if (SD_switch == 1) {        //**** Add OR in while function when Multiplexer switched
-    
-  //  update_SD();
-    // Serial.println("SD Updated ");
- // }
+  //| Case statements for various flying manoeuvres to SAVE to SD Card if SD = ON:  TODO: Determine each flight stage
+  if (SD_switch == 1) {
+    switch (flight_stage) {
+      case 0:    
+        update_SD("Stable_Flight_test.txt");
+        break;
+      case 1:    
+        update_SD("Yaw_test.txt");
+        break;
+      case 2:    
+        update_SD("Pitch_test.txt");
+        break;
+      case 3:    
+        update_SD("Stall_test.txt");
+        break;
+      case 4:    
+        update_SD("Change_alt_test.txt");
+        break;
+      case 5:    
+        update_SD("Spiral_test.txt");
+        break;
+    }
+  } else
+  {
+   if (flight_stage_flag == 0) { 
+        flight_stage++;
+        flight_stage_flag = 1; 
+  }
+  }
 
 
   update_airspeed();
   update_imu();
   update_gps();
+
 
 
 }
@@ -239,61 +259,61 @@ void loop() {
 // IMU Data Request Loop:
 void update_imu() {
 
-    imu.read();
-    mag.read();
+  imu.read();
+  mag.read();
 
-    // Read Accelerometer (g)
-    a_x =  (imu.a.x * 0.061) / 1000;
-    a_y =  (imu.a.y * 0.061) / 1000;
-    a_z =  (imu.a.z * 0.061) / 1000;
+  // Read Accelerometer (g)
+  a_x =  (imu.a.x * 0.061) / 1000;
+  a_y =  (imu.a.y * 0.061) / 1000;
+  a_z =  (imu.a.z * 0.061) / 1000;
 
-    // Read Gyroscope and compensate for Gyro offset (dps)
-    g_x = ((imu.g.x * 8.75) / 1000) - 2.46;
-    g_y = ((imu.g.y * 8.75) / 1000) - 1.71;
-    g_z = ((imu.g.z * 8.75) / 1000) + 5.52;
+  // Read Gyroscope and compensate for Gyro offset (dps)
+  g_x = ((imu.g.x * 8.75) / 1000) - 2.46;
+  g_y = ((imu.g.y * 8.75) / 1000) - 1.71;
+  g_z = ((imu.g.z * 8.75) / 1000) + 5.52;
 
-    // Read Pressure, Altitude and Temperature
-    pressure = ps.readPressureMillibars();
-    imu_altitude = ps.pressureToAltitudeMeters(pressure, 1019.1);
+  // Read Pressure, Altitude and Temperature
+  pressure = ps.readPressureMillibars();
+  imu_altitude = ps.pressureToAltitudeMeters(pressure, 1019.1);
 
-    // Read Magnetometer and correct readings (gauss)
-    vector m;
-    read_data(&m);
-    m_x = m.x / 6842;
-    m_y = m.y / 6842;
-    m_z = m.z / 6842;
+  // Read Magnetometer and correct readings (gauss)
+  vector m;
+  read_data(&m);
+  m_x = m.x / 6842;
+  m_y = m.y / 6842;
+  m_z = m.z / 6842;
 
-    // Calculate non filtered pitch, roll and yaw (degrees)
-    a_pitch = atan2(a_x, sqrt(a_y * a_y + a_z * a_z)) * RAD_to_DEG;
-    a_roll = atan2(a_y, sqrt(a_x * a_x + a_z * a_z)) * RAD_to_DEG;
+  // Calculate non filtered pitch, roll and yaw (degrees)
+  a_pitch = atan2(a_x, sqrt(a_y * a_y + a_z * a_z)) * RAD_to_DEG;
+  a_roll = atan2(a_y, sqrt(a_x * a_x + a_z * a_z)) * RAD_to_DEG;
 
-    // Complementary Filter to surpress noise in accelerometer and gyroscope data (degrees)
-    unsigned long dt = (millis() - gyro_integration_timer_start) / 1000;
-    f_pitch = (1 - 0.1) * (f_pitch + dt * g_x) + 0.1 * a_pitch;
-    f_roll = (1 - 0.1) * (f_roll + dt * g_y) + 0.1 * a_roll;
+  // Complementary Filter to surpress noise in accelerometer and gyroscope data (degrees)
+  unsigned long dt = (millis() - gyro_integration_timer_start) / 1000;
+  f_pitch = (1 - 0.1) * (f_pitch + dt * g_x) + 0.1 * a_pitch;
+  f_roll = (1 - 0.1) * (f_roll + dt * g_y) + 0.1 * a_roll;
 
-    // Start integration timer for gyro
-    gyro_integration_timer_start = 0;
-    gyro_integration_timer_start = millis();
+  // Start integration timer for gyro
+  gyro_integration_timer_start = 0;
+  gyro_integration_timer_start = millis();
 
-    // Convert filtered pitch and roll results to rad
-    f_pitch = f_pitch * DEG_to_RAD;
-    f_roll = f_roll * DEG_to_RAD;
+  // Convert filtered pitch and roll results to rad
+  f_pitch = f_pitch * DEG_to_RAD;
+  f_roll = f_roll * DEG_to_RAD;
 
-    // Calculate yaw from magnetometer. "Heading" (degrees from true North)
-    yaw_x = m_x * cos(f_pitch) + m_y * sin(f_roll) * sin(f_pitch) + m_z * cos(f_roll) * sin(f_pitch);
-    yaw_y = m_y * cos(f_roll) - m_z * sin(f_roll);
-    yaw =  atan2(yaw_y, yaw_x);
+  // Calculate yaw from magnetometer. "Heading" (degrees from true North)
+  yaw_x = m_x * cos(f_pitch) + m_y * sin(f_roll) * sin(f_pitch) + m_z * cos(f_roll) * sin(f_pitch);
+  yaw_y = m_y * cos(f_roll) - m_z * sin(f_roll);
+  yaw =  atan2(yaw_y, yaw_x);
 
-    // Aircraft ROTATIONS
-    yaw = yaw * RAD_to_DEG;
-    if (yaw < 0 ) yaw = 360 - abs(yaw);
-    f_pitch = f_pitch * RAD_to_DEG;
-    f_roll = f_roll * RAD_to_DEG;
+  // Aircraft ROTATIONS
+  yaw = yaw * RAD_to_DEG;
+  if (yaw < 0 ) yaw = 360 - abs(yaw);
+  f_pitch = f_pitch * RAD_to_DEG;
+  f_roll = f_roll * RAD_to_DEG;
 
-    // Serial.println(yaw);
+  // Serial.println(yaw);
 
-  
+
 }
 
 // Returns a set of soft & hard distortion-corrected magnetic readings from the LIS3MDL
@@ -347,13 +367,66 @@ void update_gps() {
     current_groundspeed = (fix.speed_kph(), 6);
     no_satellites = fix.satellites;
   }
- // Serial.println(gps_lat);
+  // Serial.println(gps_lat);
 }
 
 // Update and Save Measurements to SD Card:
-//void update_SD() {
+void update_SD(char filename[]) {
 
   // Write data to file
- 
+  file = sd.open(filename, FILE_WRITE);
 
-//}
+  if (file) {
+    file.print(gps_h);
+    file.print(",");
+    file.print(gps_m);
+    file.print(",");
+    file.print(gps_s);
+    file.print(",");
+    file.print(current_groundspeed);
+    file.print(",");
+    file.print(current_airspeed);
+    file.print(",");
+    file.print(gps_lat, 6);
+    file.print(",");
+    file.print(gps_long, 6);
+    file.print(",");
+    file.print(no_satellites);
+    file.print(",");
+    file.print(f_pitch);
+    file.print(",");
+    file.print(f_roll);
+    file.print(",");
+    file.print(yaw);
+    file.print(",");
+    file.print(pressure);
+    file.print(",");
+    file.print(imu_altitude);
+    file.print(",");
+    file.println();
+    file.close();
+
+
+  }
+}
+
+void pwm_calc()
+{
+  // If the pin is high, its the start of an interrupt
+  if (digitalRead(3) == HIGH)
+  {
+    // get the time using micros
+    pwm_prev_time = micros();
+  }
+  else
+  {
+    // If the pin is low, its the falling edge of the pulse so now we can calculate the pulse duration by subtracting the
+    // previous time pwm_prev_time from the current time returned by micros()
+    if (pwm_prev_time && (b_OH_SHIT_SWITCH_Signal == false))
+    {
+      OH_SHIT_SWITCH_In = (int)(micros() - pwm_prev_time);
+      pwm_prev_time = 0;
+      b_OH_SHIT_SWITCH_Signal = true;
+    }
+  }
+}
