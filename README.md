@@ -21,7 +21,7 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 #### Save all measurements to SD Card
 
 
-## TODO:
+### TODO:
 MUX OH SHIT SWITCH Switch code
 
 Rudder and Elevator PWM Measurements
