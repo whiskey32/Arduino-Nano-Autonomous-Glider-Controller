@@ -22,9 +22,9 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 
 
 ### TODO:
-MUX OH SHIT SWITCH Switch code [imu_plus_AS_SD_SMALL.ino](autonomous_glider_controller_0.1/Tests/imu_plus_AS_SD_SMALL/imu_plus_AS_SD_SMALL.ino)
+MUX OH SHIT SWITCH Switch code [imu_plus_AS_SD_SMALL](Tests/imu_plus_AS_SD_SMALL/imu_plus_AS_SD_SMALL.ino)
 
-Rudder and Elevator PWM Measurements  [pwm_with_library.ino](autonomous_glider_controller_0.1/Tests/pwm_with_library/pwm_with_library.ino)
+Rudder and Elevator PWM Measurements [pwm_with_library](Tests/pwm_with_library/pwm_with_library.ino)
 
 Controller Simulation
 
