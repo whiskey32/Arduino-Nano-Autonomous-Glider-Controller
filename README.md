@@ -1,6 +1,6 @@
 
 # SKRIPSIE 2019. 
-# Arduino_nano_glider_controller
+# Arduino Nano Glider Controller
 Autonomous Glider Controller For a RC Glider. The autonomous_glider_controller_0.1.ino sketch contains the main code to be uploaded to Arduino Nano.
 
 # Finished:
