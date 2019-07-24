@@ -6,8 +6,8 @@ Autonomous Glider Controller for a RC Glider. The autonomous_glider_controller_0
 # Finished:
 IMU Measurements:
 - Accelerometer
-- Gyroscope    ( Offsets needs to be determined)
-- Magnetometer ( Needs to be calibrated)
+- Gyroscope    (Offsets needs to be determined)
+- Magnetometer (Needs to be calibrated)
 - Pressure sensor for altitude calculation
 
 Airspeed Sensor Measurements
