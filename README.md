@@ -12,7 +12,7 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 
 #### Airspeed Sensor Measurements
 
-#### GPS Data
+#### GPS Data:
 - Lattitude and Longitude
 - h, m, s
 - Groundspeed
