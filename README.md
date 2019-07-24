@@ -22,7 +22,7 @@ Save all measurements to SD Card
 
 
 # TODO:
-MUX Switch code
+MUX OH SHIT SWITCH Switch code
 
 Rudder and Elevator PWM Measurements
 
