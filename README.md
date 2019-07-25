@@ -28,6 +28,8 @@ Controller Simulation
 
 PCB Design, Print and Solder
 
+Receiver PWM output measure and edit main code
+
 Real time Rudder and Elevator PWM Measurements 
 
 Lateral and Longitudinal Controller 
