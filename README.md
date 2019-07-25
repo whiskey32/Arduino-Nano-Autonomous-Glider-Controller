@@ -19,7 +19,7 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 - Number of satellites connected
 
 #### Save all measurements to SD Card
-- OH SHIT SWITCH Switch saves measurements
+- OH SHIT SWITCH saves measurements
 
 
 ### TODO:
