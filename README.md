@@ -11,6 +11,7 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 - Pressure sensor for altitude calculation
 
 #### Airspeed Sensor Measurements
+- m/s or km/h 
 
 #### GPS Data:
 - Lattitude and Longitude
