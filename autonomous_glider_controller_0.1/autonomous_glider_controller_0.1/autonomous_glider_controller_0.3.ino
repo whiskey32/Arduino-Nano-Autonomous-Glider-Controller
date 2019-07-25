@@ -8,7 +8,7 @@
   and fed back to the elevator and rudder to keep the glider stable and on track.
   // Created: BJGW DU PLESSIS
   // Student Number: 18989780
-  // Modified: 2019/07/24
+  // Modified: 2019/07/25
   // Version: 0.3
 */
 
@@ -30,7 +30,7 @@
 #include <LSM6.h>
 #include <LPS.h>
 #include <LIS3MDL.h>
-// #include <ServoTimer2.h>
+#include <ServoTimer2.h>
 
 // GPS Port settings; AltSoftSerial gpsPort(8,9); 8 & 9 for Nano RX, TX
 //#define GPS_PORT_NAME "AltSoftSerial"
@@ -130,22 +130,12 @@ volatile int OH_SHIT_SWITCH_In = 0; // Oh shit switch PWM Value set to neutral P
 volatile unsigned long pwm_prev_time = 0; // Previous time of pwm value
 volatile boolean b_OH_SHIT_SWITCH_Signal = false; // Set in the interrupt and read in the loop
 
-// PWM Signal Generation Servo Objects 
-// ServoTimer2 rudder;
-// ServoTimer2 elevator;
-
 // SD Card Object
 SdFat sd;
 
 // Measurements File Object
 // File Format: [hour, minute, second, Current Ground Speed (km/h), Current Airspeed Speed(km/h), Latitude (°), Longitude (°), satellites, pitch (degrees), roll (degrees), yaw (degrees), pressure (mbar), imu_altitude (m)]
 File file;
-boolean SD_switch;   // Do not write to SD = 0; Write to SD = 1
-
-// Flight Stage Variables
-int flight_stage;       // Flight stages determined from 0 to 5
-int flight_stage_flag;  // Flight stage flag that increments flight stage each time OH SHIT SWITCH is flipped
-
 
 //|| Setup Code:
 void setup() {
@@ -155,7 +145,7 @@ void setup() {
   gpsPort.begin(9600);    // Gps Baud Rate
   Wire.begin();           // Join i2c Bus for Airspeed Measurements
   sd.begin();             // Initializes the SD card for SPI communication
-  
+
   //| Initialise IMU Sensors
   imu.init();
   imu.enableDefault();
@@ -172,16 +162,9 @@ void setup() {
 
   //| Setup Save Measurements to SD Card:
   pinMode(13, OUTPUT);
-  // sd.remove("measure.txt");  // Clear Current File
-  SD_switch = 0;                // Do not write to SD
-
-  flight_stage = -1;      // Set initial flight stage to 0 after flight stage flag incremented it from -1 to 0
-  flight_stage_flag = 0;  // Set initial flight stage flag to 0
-
-  
+  sd.remove("Stable_Flight_test.txt");  // Clear Current File
 
   Serial.println("Setup Complete");
-
 
 
 }
@@ -196,54 +179,23 @@ void loop() {
   // MUX SIGNAL SELECT
   digitalWrite(4, HIGH); // Signal select LOW = ARDUINO PWM Input; HIGH = ONBOARD RECEIVER PWM Input   *******************NB*************** For Measurments set to HIGH
 
-  Serial.println(OH_SHIT_SWITCH_In);
-  
+  // Check if OH SHIT SWITCH is enabled. TODO: Take average over time
   if (b_OH_SHIT_SWITCH_Signal)
   {
     if ( OH_SHIT_SWITCH_In >= 1000 &&  OH_SHIT_SWITCH_In <= 3000)
     {
-      //Serial.println(OH_SHIT_SWITCH_In);
-      SD_switch = 1;
-      flight_stage_flag = 0;
-      b_OH_SHIT_SWITCH_Signal = false; // Set switch back to false to recalculate next PWM duaration
+      // Serial.println(OH_SHIT_SWITCH_In);
+      update_SD("Stable_Flight_test.txt");
     }
-  
-  else {
-      SD_switch = 0;
-  }
-  }
-
-  //| Case statements for various flying manoeuvres to SAVE to SD Card if SD = ON:  TODO: Determine each flight stage
-  if (SD_switch == 1) {
-    switch (flight_stage) {
-      case 0:    
-        update_SD("Stable_Flight_test.txt");
-        break;
-      case 1:    
-        update_SD("Yaw_test.txt");
-        break;
-      case 2:    
-        update_SD("Pitch_test.txt");
-        break;
-      case 3:    
-        update_SD("Stall_test.txt");
-        break;
-      case 4:    
-        update_SD("Change_alt_test.txt");
-        break;
-      case 5:    
-        update_SD("Spiral_test.txt");
-        break;
-    }
-  } else
-  {
-   if (flight_stage_flag == 0) { 
-        flight_stage++;
-        flight_stage_flag = 1; 
-  }
+    b_OH_SHIT_SWITCH_Signal = false; // Set switch back to false to recalculate next PWM duaration
   }
 
 
+
+  //| TODO: Case statements for various flying manoeuvres
+
+
+  //| Take Measurements:
   update_airspeed();
   update_imu();
   update_gps();
@@ -253,8 +205,6 @@ void loop() {
 }
 
 //|| Other Functions/Loops
-
-//| Take Measurements:
 
 // IMU Data Request Loop:
 void update_imu() {
@@ -410,6 +360,7 @@ void update_SD(char filename[]) {
   }
 }
 
+// Calculate PWM Pulse Width:
 void pwm_calc()
 {
   // If the pin is high, its the start of an interrupt
