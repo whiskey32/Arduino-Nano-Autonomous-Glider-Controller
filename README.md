@@ -19,14 +19,16 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 - Number of satellites connected
 
 #### Save all measurements to SD Card
+- OH SHIT SWITCH Switch saves measurements
 
 
 ### TODO:
-MUX OH SHIT SWITCH Switch code [imu_plus_AS_SD_SMALL](Tests/imu_plus_AS_SD_SMALL/imu_plus_AS_SD_SMALL.ino)
-
-Rudder and Elevator PWM Measurements [pwm_with_library](Tests/pwm_with_library/pwm_with_library.ino)
 
 Controller Simulation
+
+PCB Design, Print and Solder
+
+Real time Rudder and Elevator PWM Measurements 
 
 Lateral and Longitudinal Controller 
 
