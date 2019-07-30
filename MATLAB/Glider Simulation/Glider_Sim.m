@@ -53,6 +53,9 @@ CL_min = 0.4;                % Wing Profile Drag Variable 3
  CL_alpha = (a_0)/(1+(a_0)/(pi*e*AR));                          % Finite Wing Slope
 
  
+ d_alpha= 0.01;
+ alpha = -45:d_alpha:45;  % Plot in radians up until 45 degrees
+
  % Drag Coefficient function of alpha
  CD_0 = (CD_F*S_F)/(S) + (CD_T*(S_T + S_V))/(S) + CD_E + Cd_0;  % Constant Part of Total Drag Formula
  
@@ -64,8 +67,7 @@ CL_min = 0.4;                % Wing Profile Drag Variable 3
 %// Plot Graphs
 %/////////////////////////////////////////////////////////////////////////
 
-d_alpha= 0.01;
-alpha = -45:d_alpha:45;  % Plot in radians up until 45 degrees
+
  
 % figure(1)
 % plot(alpha,LC(alpha*(pi)/(180),CL_alpha,alpha_0));
