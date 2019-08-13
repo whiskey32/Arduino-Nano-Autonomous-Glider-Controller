@@ -66,7 +66,7 @@ function [sys,x0,str,ts]=mdlInitializeSizes(ho,mo,UVWo,RPYo)
 sizes = simsizes;
 sizes.NumContStates  = 13;
 sizes.NumDiscStates  = 0;
-sizes.NumOutputs     = 14;
+sizes.NumOutputs     = 15;
 sizes.NumInputs      = 2;
 sizes.DirFeedthrough = 1;
 sizes.NumSampleTimes = 1;   % at least one sample time is needed
@@ -101,11 +101,12 @@ str = [];       % Empty string
 ts  = [0 0];    % Continuous time
 
 % Initialise other simulation constants for derivative calculations
-global mass Ixyz Alpha Beta
+global mass Ixyz Alpha Beta Init
 mass = mo;                              % Total mass of glider in kg
-Ixyz = [0.2; 0.36; 0.525];              % MOI parameters of glider in kgm2
+Ixyz = [0.55; 0.35; 0.89];              % Estimated MOI parameters of glider in kgm2
 Alpha = 2.5*d2r;                        % Initial AoA = Alpha_zero
 Beta = YY;                              % Initial Sideslip = Yaw(0)                              
+Init = 1;
 
 % end mdlInitializeSizes
 
@@ -117,8 +118,8 @@ Beta = YY;                              % Initial Sideslip = Yaw(0)
 %
 function sys=mdlDerivatives(~,x,u)
 
-global VV WW NED QQ AA mass Ixyz Alpha Beta
-VV = x(1:3); WW = x(4:6); QQ = x(10:13);
+global VV WW NED QQ AA mass Ixyz Alpha Beta Head
+VV = x(1:3); WW = x(4:6); NED = x(7:9); QQ = x(10:13);
 d2r = pi/180;
 
 % Gravity force vector
@@ -147,7 +148,7 @@ XYZ = FG + FA;
 bw = 2.6;
 cbar = 0.24;
 Vm2 = 2.0*Vmag;
-Cl = -0.0331*Beta - (0.4248*WW(1) - 0.045*WW(3))*bw/Vm2 + 0.008*u(1)*d2r;  % u(1) = delR
+Cl = -0.0331*Beta - (0.4248*WW(1) - 0.045*WW(3))*bw/Vm2 - 0.008*u(1)*d2r;  % u(1) = delR
 Cm = -0.2954*Alpha - 10.281*WW(2)*cbar/Vm2 - 1.5852*u(2)*d2r;              % u(2) = delE  
 Cn = 0.086*Beta - (0.0251*WW(1) + 0.125*WW(3))*bw/Vm2 - 0.1129*u(1)*d2r;
 % Aerodynamic moment vector
@@ -160,6 +161,7 @@ PQRdot = [(LMN(1) - WW(3)*WW(2)*(Ixyz(3)-Ixyz(2)))/Ixyz(1);
           (LMN(3) - WW(2)*WW(1)*(Ixyz(2)-Ixyz(1)))/Ixyz(3)];
 % PQRdot = zeros(3,1);
 NEDdot = AA'*VV;
+Head = atan2(NEDdot(2),NEDdot(1));
 
 % Kinematics
 Qdot = 0.5*[0 WW(3) -WW(2) WW(1);-WW(3) 0 WW(1) WW(2);WW(2) -WW(1) 0 WW(3);-WW(1) -WW(2) -WW(3) 0]*QQ;
@@ -190,7 +192,7 @@ sys = [];
 %
 function sys=mdlOutputs(~,x,~)
 
-global VV WW NED QQ AA Alpha Beta
+global VV WW NED QQ AA Alpha Beta Head Init
 VV = x(1:3); WW = x(4:6); NED = x(7:9); QQ = x(10:13);
 AA(1,1) = QQ(1)^2 - QQ(2)^2 - QQ(3)^2 + QQ(4)^2;
 AA(1,2) = 2*(QQ(1)*QQ(2) + QQ(3)*QQ(4));
@@ -220,7 +222,12 @@ else
     Beta = atan(VV(2)/norm(VV));
 end
 
-sys = [VV;WW;NED;r2d*RR;r2d*PP;r2d*YY;r2d*Alpha;r2d*Beta];
+if Init == 1
+    sys = zeros(15,1);
+    Init = 0;
+else
+    sys = [VV;WW;NED;r2d*RR;r2d*PP;r2d*YY;r2d*Alpha;r2d*Beta;r2d*Head];
+end
 
 % end mdlOutputs
 
