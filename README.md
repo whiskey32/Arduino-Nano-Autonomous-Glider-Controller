@@ -36,7 +36,7 @@ Navigational Controller
 
 Control Loop
 
-Receiver PWM output measure and edit main code
+OH SHIT SWITCH, to switch between controller and pilot
 
 Real time Rudder and Elevator PWM Measurements with Labada Box 
 
