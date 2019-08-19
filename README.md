@@ -36,9 +36,15 @@ Navigational Controller
 
 Control Loop
 
+PCB
+
 OH SHIT SWITCH, to switch between controller and pilot
 
-Real time Rudder and Elevator PWM Measurements with Labada Box 
+Design gain values with Root Locus method
+
+Real time Rudder and Elevator PWM Measurements with Labada Box
+
+Communication
 
 
 
