@@ -11,29 +11,34 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 - Pressure sensor for altitude calculation
 
 #### Airspeed Sensor Measurements
-- m/s or km/h 
+- m/s  
 
 #### GPS Data:
 - Lattitude and Longitude
+- Altitude
+- Heading
 - h, m, s
-- Groundspeed
 - Number of satellites connected
 
 #### Save all measurements to SD Card
 - OH SHIT SWITCH saves measurements
 
+#### Controller Simulation
+- Dynamic Glider model in MATLAB
+- PID Airspeed Controller
+- PD cross-track position error controller towards destination coordinates
 
 ### TODO:
 
-Controller Simulation
+Airspeed and Heading Controller on Arduino 
 
-PCB Design, Print and Solder
+Navigational Controller
+
+Control Loop
 
 Receiver PWM output measure and edit main code
 
-Real time Rudder and Elevator PWM Measurements 
+Real time Rudder and Elevator PWM Measurements with Labada Box 
 
-Lateral and Longitudinal Controller 
 
-Navigational Controller
 
