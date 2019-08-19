@@ -1,7 +1,7 @@
 
 # SKRIPSIE 2019. 
 ## Arduino Nano Glider Controller
-Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_0.1](autonomous_glider_controller_0.1) folder contains the main sketch code to be uploaded to the Arduino Nano.
+Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_0.1](autonomous_glider_controller_0.1) folder contains the main sketch code to be uploaded to the Arduino Nano in order to save measurements to the SD Card. This code contains the following measurements:
 
 ### FINISHED:
 #### 10-DOF IMU Measurements:
