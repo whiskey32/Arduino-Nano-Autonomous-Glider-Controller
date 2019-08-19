@@ -26,7 +26,7 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 #### Controller Simulation
 - Dynamic Glider plant model in MATLAB
 - PID Airspeed Controller
-- PD cross-track position error controller towards destination coordinates
+- PD cross-track position error controller
 
 ### TODO:
 
