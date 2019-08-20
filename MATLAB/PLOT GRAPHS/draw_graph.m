@@ -13,9 +13,18 @@ clc
 
 
 % Read in .tx.t file to array
- IMU_data=dlmread('complementary_filter_pitch_a01.csv');
+%IMU_data=dlmread('complementary_filter_pitch_a01.csv');
 % Mag_data=dlmread('raw_mag_outside_balcony.csv');
 % Mag_data=dlmread('coetzenburg_mag_3.csv');
+gndtest_data = dlmread('2.csv');
+
+% Plot Airspeed Data
+airspeed = gndtest_data(:,7);
+[n,p] = size(airspeed);
+t= 1:n;
+figure(1);
+plot(t,airspeed);
+
 
 
 % Copy Accelerometer data to inidividual axis array
@@ -82,20 +91,20 @@ clc
 
 %#######################################################################%
 % Copy Filtered and Non Filtered Roll test data data to inidividual axis array
-roll_nf=IMU_data(:,2);
-roll_f=IMU_data(:,4);
+% roll_nf=IMU_data(:,2);
+% roll_f=IMU_data(:,4);
 
 % Plot Filtered and Non Filtered Roll test Plot 
-[n,p] = size(roll_nf);
-t= 1:n;
-figure(1);
-plot(t,roll_nf);
-hold on
-plot(t,roll_f);
-legend('roll_nf','roll_f');
-xlabel('Samples'), ylabel('Roll (degrees)')
-title('Complementary Filter on Roll data ')
-hold off
+% [n,p] = size(roll_nf);
+% t= 1:n;
+% figure(1);
+% plot(t,roll_nf);
+% hold on
+% plot(t,roll_f);
+% legend('roll_nf','roll_f');
+% xlabel('Samples'), ylabel('Roll (degrees)')
+% title('Complementary Filter on Roll data ')
+% hold off
 
 % 
 % Copy Filtered and Non Filtered Pitch test data data to inidividual axis array
