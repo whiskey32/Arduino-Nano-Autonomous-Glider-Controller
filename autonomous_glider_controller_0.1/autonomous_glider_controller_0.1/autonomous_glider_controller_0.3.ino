@@ -1,11 +1,11 @@
 /*
-  Arduino NANO: Autonomous Glider Controller 
+  Arduino NANO: Autonomous Glider Controller
   Measure and Store Sensor Output Sketch
   This code measures three inputs from the analog sensor pins. Namely, GPS data, IMU data and Pitot Tube Airspeed data.
-  All of the measuerd data is stored in the Stable_Flight_test.txt file found on the SD card.  
+  All of the measuerd data is stored in the Stable_Flight_test.txt file found on the SD card.
   // Created: BJGW DU PLESSIS
   // Student Number: 18989780
-  // Modified: 2019/08/19
+  // Modified: 2019/08/21
   // Version: 0.4
 */
 
@@ -55,14 +55,13 @@ LIS3MDL mag;              // Magnetometer Object
 LPS ps;                   // Pressure sensor Object
 
 // GPS VARIABLES
+int32_t  gps_h;                             // Time (Hours)
+int32_t  gps_m;                             // Time (Minutes)
+int32_t  gps_s;                             // Time (Seconds)
+int32_t  gps_altitude;                      // Altitude (m)
 int32_t  gps_lat;                           // Latitude (signed degrees)
 int32_t  gps_long;                          // Longitude (signed degrees)
-int32_t  gps_altitude;                      // Altitude (m)
 int32_t  gps_heading;                       // Heading from true North (Degrees)
-int32_t  gps_h;                             // Time (Hours)
-int32_t  gps_m;                             // Time (Hours)
-int32_t  gps_s;                             // Time (Hours)
-int32_t  current_groundspeed;               // Groundspeed (km/h)
 int32_t  no_satellites;                     // Number of satellites
 
 // The serial connection to the GPS module:
@@ -122,12 +121,16 @@ float yaw;     // Yaw derived from X, Y, Z magnetometer readings (degrees)
 float current_airspeed;                      // Current Airspeed (m/s)
 byte buffer_airspeed[16];                    // Airspeed Sensor 16 Byte Buffer
 unsigned long previousMillis_airspeed = 0;   // Store last time airspeed was updated
-// const long interval_airspeed = 250;          // Interval at which to update airspeed (milliseconds)
+// const long interval_airspeed = 150;          // Interval at which to update airspeed (milliseconds)
 
 // PWM Signal Measure
 volatile int OH_SHIT_SWITCH_In = 0; // Oh shit switch PWM Value set to neutral PWM microseconds value TODO; Check neutral value
 volatile unsigned long pwm_prev_time = 0; // Previous time of pwm value
 volatile boolean b_OH_SHIT_SWITCH_Signal = false; // Set in the interrupt and read in the loop
+
+// Servo Objects for PWM Signal Generation
+//ServoTimer2 rudder;
+//ServoTimer2 elevator;
 
 // SD Card Object
 SdFat sd;
@@ -175,19 +178,19 @@ void loop() {
   // rudder.write(1508);
   // elevator.write(1508);
 
-//  // MUX SIGNAL SELECT
-//  digitalWrite(4, HIGH); // Signal select LOW = ARDUINO PWM Input; HIGH = ONBOARD RECEIVER PWM Input   *******************NB*************** For Measurments set to HIGH
-//
-//  // Check if OH SHIT SWITCH is enabled. TODO: Take average over time
-//  if (b_OH_SHIT_SWITCH_Signal)
-//  {
-//    if ( OH_SHIT_SWITCH_In >= 1000 &&  OH_SHIT_SWITCH_In <= 3000)
-//    {
-//      // Serial.println(OH_SHIT_SWITCH_In);
-//      update_SD("Stable_Flight_test.txt");
-//    }
-//    b_OH_SHIT_SWITCH_Signal = false; // Set switch back to false to recalculate next PWM duaration
-//  }
+  //  // MUX SIGNAL SELECT
+  //  digitalWrite(4, HIGH); // Signal select LOW = ARDUINO PWM Input; HIGH = ONBOARD RECEIVER PWM Input   *******************NB*************** For Measurments set to HIGH
+  //
+  //  // Check if OH SHIT SWITCH is enabled. TODO: Take average over time
+  //  if (b_OH_SHIT_SWITCH_Signal)
+  //  {
+  //    if ( OH_SHIT_SWITCH_In >= 1000 &&  OH_SHIT_SWITCH_In <= 3000)
+  //    {
+  //      // Serial.println(OH_SHIT_SWITCH_In);
+  //      update_SD("Stable_Flight_test.txt");
+  //    }
+  //    b_OH_SHIT_SWITCH_Signal = false; // Set switch back to false to recalculate next PWM duaration
+  //  }
 
 
 
@@ -224,7 +227,7 @@ void update_imu() {
   g_y = ((imu.g.y * 8.75) / 1000) - 1.71;
   g_z = ((imu.g.z * 8.75) / 1000) + 5.52;
 
-  // Read Pressure, Altitude and Temperature
+  // Read Pressure and determine Altitude 
   pressure = ps.readPressureMillibars();
   imu_altitude = ps.pressureToAltitudeMeters(pressure, 1019.1);
 
@@ -263,7 +266,7 @@ void update_imu() {
   f_pitch = f_pitch * RAD_to_DEG;
   f_roll = f_roll * RAD_to_DEG;
 
-  Serial.println(g_z);
+  // Serial.println(g_z);
 
 
 }
@@ -297,7 +300,7 @@ void update_airspeed() {
         buffer_airspeed[i] = Wire.read();      // Receive and store 16 bytes
       }
     }
-    current_airspeed = (buffer_airspeed[2] * 256 + buffer_airspeed[3]) / 3.6;    // Airspeed: MSB = Byte 2 & LSB = Byte 3  (1 km/h increments) 
+    current_airspeed = (buffer_airspeed[2] * 256 + buffer_airspeed[3]) / 3.6;    // Airspeed: MSB = Byte 2 & LSB = Byte 3  (1 km/h increments)
   }
   // Serial.println(current_airspeed);
 }
@@ -307,17 +310,17 @@ void update_gps() {
 
   while (gps.available(gpsPort)) {
     fix = gps.read();
-    if (fix.valid.location) {
-      gps_lat = fix.latitudeL();
-      gps_long = fix.longitudeL();
-    }
     if (fix.valid.time) {
       gps_h = fix.dateTime.hours;
       gps_m = fix.dateTime.minutes;
       gps_s = fix.dateTime.seconds;
     }
-     if (fix.valid.altitude) {
+    if (fix.valid.altitude) {
       gps_altitude = (fix.altitude());
+    }
+    if (fix.valid.location) {
+      gps_lat = fix.latitudeL();
+      gps_long = fix.longitudeL();
     }
     if (fix.valid.heading) {
       gps_heading = (fix.heading());
