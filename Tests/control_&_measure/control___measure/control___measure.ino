@@ -4,12 +4,12 @@
   All of the measuerd data is stored in the Stable_Flight_test.txt file found on the SD card. Airpeed and heading controllers are designed,
   tested and optimized in MATLAB. These PID and PD controllers respectively are added in the loop to glide the glider from a high altitude
   weather balloon release to a desired landing field GPS-coordinate. PWM output signals with different duty cycles are generated
-  and fed back to the elevator and rudder to keep the glider stable and on track. The controller can be switched with the OH SHIT SWITCH between 
-  autonomous mode and pilot mode. 
+  and fed back to the elevator and rudder to keep the glider stable and on track. The controller can be switched with the OH SHIT SWITCH between
+  autonomous mode and pilot mode.
   // Created: BJGW DU PLESSIS
   // Student Number: 18989780
-  // Modified: 2019/08/20
-  // Version: 0.5
+  // Modified: 2019/08/21
+  // Version: 0.6
 */
 
 #include "Arduino.h"
@@ -27,6 +27,7 @@
 
 #define RAD_to_DEG (180 / PI)  // Convert from radians to degrees
 #define DEG_to_RAD (PI / 180)  // Convert from degrees to radians
+#define DEG_to_PWM (13.4)      // Convert actuator control input from degrees to a PWM width (us)
 
 // IMU Sensor Objects:
 LSM6 imu;                 // Gyro Object
@@ -72,16 +73,33 @@ File file;
 
 // Airspeed PID Controller Variables
 unsigned long currentMillis_PID, previousMillis_PID  = 0;   // Store time elapsed for PID controller
-double elapsedMillis_PID;  
+double elapsedMillis_PID;
 float v_ref;
-float v_current_err;         // Current Error 
-float v_prev_err = 0;        // Store previous error for derivative calculation
+float v_current_err;         // Current Error
+float v_prev_err = 0;        // Store previous airspeed error for derivative calculation
 double v_error_integral;     // Error Integral
-double v_error_derivative;   // Error Derivative
-int Kp_airpeed = 1;          // P Gain
+double v_error_derivative;   // Airspeed error derivative
+int Kp_airspeed = 1;         // P Gain
 int Ki_airspeed = 0.3;       // I Gain
 int Kd_airspeed = 2;         // D Gain
 double elevator_output;      // Elevator output control input signal
+
+// Heading PD Controller Variables
+unsigned long currentMillis_PD, previousMillis_PD  = 0;   // Store time elapsed for PD controller
+double elapsedMillis_PD;
+float turn;   // Shortest turn angle error
+float heading_current_err;     // Shortest turn angle error
+float heading_prev = 0;        // Store previous heading error for derivative calculation
+double heading_derivative;     // Gyro error derivative
+double headingrate_error_gyro; // Gyro error
+int Kp_heading = 0.6;          // P Gain
+int Kd_heading = 0.6 ;         // Gyro D Gain
+double rudder_output;          // Elevator output control input signal
+
+// Servo Objects for PWM Signal Generation
+ServoTimer2 rudder;
+ServoTimer2 elevator;
+
 
 
 //|| Setup Code:
@@ -103,6 +121,12 @@ void setup() {
   pinMode(13, OUTPUT);
   sd.remove("Stable_Flight_test.txt");  // Clear Current File
 
+  //| Setup PWM Rudder, Elevator, Signal Select and OH SHIT SWITCH Connections
+  rudder.attach(A1);     // Rudder PWM  Output. Pin A1
+  elevator.attach(A2);   // Elevator PWM  Output. Pin A2
+  pinMode(4, OUTPUT);    // Sets digital pin 4 as Signal Select switch output signal
+
+
   Serial.println("Setup Complete");
 
 
@@ -111,6 +135,9 @@ void setup() {
 //|| Main Control Loop:
 void loop() {
 
+  // MUX SIGNAL SELECT
+  digitalWrite(4, LOW); // Signal select LOW = ARDUINO PWM Input; HIGH = ONBOARD RECEIVER PWM Input   *******************NB*************** For Measurments set to HIGH
+
   //| Take Measurements:
   update_airspeed();
   update_imu();
@@ -118,6 +145,12 @@ void loop() {
 
   //| Save Measurements:
   update_SD("Stable_Flight_test.txt");
+
+  //control_airspeed(14, 2100);
+
+ control_heading(0, 350, 0);
+
+
 
 
 }
@@ -139,19 +172,19 @@ void update_airspeed() {
         buffer_airspeed[i] = Wire.read();      // Receive and store 16 bytes
       }
     }
-    current_airspeed = (buffer_airspeed[2] * 256 + buffer_airspeed[3]) / 3.6;    // Airspeed: MSB = Byte 2 & LSB = Byte 3  (1 km/h increments) 
+    current_airspeed = (buffer_airspeed[2] * 256 + buffer_airspeed[3]) / 3.6;    // Airspeed: MSB = Byte 2 & LSB = Byte 3  (1 km/h increments)
   }
 }
 
 // IMU Data Request Loop:
 void update_imu() {
-  
+
   imu.read();
 
   // Read Gyroscope and compensate for Gyro offset (dps)
   g_z = ((imu.g.z * 8.75) / 1000) + 5.52;
 
-  // Read Pressure and determine Altitude 
+  // Read Pressure and determine Altitude
   pressure = ps.readPressureMillibars();
   imu_altitude = ps.pressureToAltitudeMeters(pressure, 1030);
 
@@ -217,62 +250,123 @@ void update_SD(char filename[]) {
 // AIRSPEED PID CONTROLLER
 void control_airspeed(float airspeed, int32_t alt) {
 
-// Determine time elapsed
-currentMillis_PID = millis();
-elapsedMillis_PID = currentMillis_PID - previousMillis_PID;
+  // Determine time elapsed
+  currentMillis_PID = millis();
+  elapsedMillis_PID = currentMillis_PID - previousMillis_PID;
 
-// Determine Airspeed Reference
-if (alt < 1000) {
-   v_ref = 10.97;
-}  
-else if (alt >= 1000 && alt < 2000) {
-   v_ref = 11.25;
-}  
-else if (alt > 2000 && alt < 3000) {
-   v_ref = 11.8;
-}
-else if (alt > 3000 && alt < 4000) {
-   v_ref = 12.5;
-}
-else if (alt > 4000 && alt < 5000) {
-   v_ref = 13.4;
-}
-else if (alt > 5000 && alt < 6000) {
-   v_ref = 14.5;
-}
-else if (alt > 6000 && alt < 7000) {
-   v_ref = 16.0;
-}
-else if (alt > 7000 && alt < 8000) {
-   v_ref = 18.0;
-}
-else if (alt > 8000 && alt < 9000) {
-   v_ref = 21.0;
-}
-else if (alt > 9000 && alt < 10000) {
-   v_ref = 26.2;
-}
-else {
+  // Determine Airspeed Reference
+  if (alt < 1000) {
+    v_ref = 10.97;
+  }
+  else if (alt >= 1000 && alt < 2000) {
+    v_ref = 11.25;
+  }
+  else if (alt > 2000 && alt < 3000) {
+    v_ref = 11.8;
+  }
+  else if (alt > 3000 && alt < 4000) {
+    v_ref = 12.5;
+  }
+  else if (alt > 4000 && alt < 5000) {
+    v_ref = 13.4;
+  }
+  else if (alt > 5000 && alt < 6000) {
+    v_ref = 14.5;
+  }
+  else if (alt > 6000 && alt < 7000) {
+    v_ref = 16.0;
+  }
+  else if (alt > 7000 && alt < 8000) {
+    v_ref = 18.0;
+  }
+  else if (alt > 8000 && alt < 9000) {
+    v_ref = 21.0;
+  }
+  else if (alt > 9000 && alt < 10000) {
+    v_ref = 26.2;
+  }
+  else {
     v_ref = 38.2;
-}
+  }
 
   // Determine Airspeed error
-v_current_err = v_ref - airspeed;
+  v_current_err = v_ref - airspeed;
 
-// Determine Integral of error
-v_error_integral += v_current_err*elapsedMillis_PID;
+  //Serial.println(v_current_err);
 
-// Determine Derivative of error
-v_error_derivative += (v_current_err-v_prev_err)/elapsedMillis_PID;
+  // Determine Integral of error
+  v_error_integral += v_current_err * elapsedMillis_PID;
 
-// Determine elevator output signal
-elevator_output = (Kp_airpeed*v_current_err) + Kp_airpeed*v_error_integral + Kp_airpeed*v_error_derivative;
-
-// Save current error and time
-v_prev_err = v_current_err;
-previousMillis_PID = currentMillis_PID;
+  // Determine Derivative of error
+  v_error_derivative = (v_current_err - v_prev_err) / elapsedMillis_PID;
   
-  
+  // Determine PWM elevator output signal width
+  elevator_output = 1508 - (DEG_to_PWM) * (Kp_airspeed * v_current_err + Ki_airspeed * v_error_integral + Kd_airspeed * v_error_derivative);
 
- 
+  Serial.println(Kp_airspeed * v_current_err + Ki_airspeed * v_error_integral + Kd_airspeed * v_error_derivative);
+
+  // Servo Saturation (+- 10 Degrees)
+  if (elevator_output > (1508 + DEG_to_PWM * 10)) elevator_output = 1508 + DEG_to_PWM * 10;
+  if (elevator_output < (1508 - DEG_to_PWM * 10)) elevator_output = 1508 - DEG_to_PWM * 10;
+
+  // Send PWM signal width to elevator servo
+  elevator.write(elevator_output);
+
+  // Save current error and time
+  v_prev_err = v_current_err;
+  previousMillis_PID = currentMillis_PID;
+
+}
+
+
+// Heading PD CONTROLLER
+void control_heading(int32_t heading, int32_t ref, float g_z) {
+
+  // Determine time elapsed
+  currentMillis_PD = millis();
+  elapsedMillis_PD = currentMillis_PD - previousMillis_PD;
+
+  // Normalise reference & heading to +/-180 degrees axis system
+  if (heading > 180 || ref > 180) {
+    heading = heading - 360;
+    ref = ref - 360;
+  }
+
+  // Calculate shortest turn angle error
+  turn = ref - heading;
+
+  //Serial.println(turn);
+
+  if (turn > 180) {
+    heading_current_err = -(turn - 360);
+  }
+  else if (turn < -180) {
+    heading_current_err = (abs(turn) - 360);
+  }
+  else {
+    heading_current_err = -turn;
+  }
+
+  // Determine Derivative of error
+  heading_derivative = (heading - heading_prev) / elapsedMillis_PD;
+  
+  // Determine Gyro error
+  headingrate_error_gyro = heading_derivative - g_z;
+
+  // Determine PWM rudder output signal width
+  rudder_output = 1508 - (DEG_to_PWM) * (Kp_heading * heading_current_err +  Kd_heading *  headingrate_error_gyro);
+
+  //Serial.println(heading_derivative);
+
+  // Servo Saturation (+- 10 Degrees)
+  if (rudder_output > (1508 + DEG_to_PWM * 10)) rudder_output = 1508 + DEG_to_PWM * 10;
+  if (rudder_output < (1508 - DEG_to_PWM * 10)) rudder_output = 1508 - DEG_to_PWM * 10;
+
+  // Send PWM signal width to rudder servo
+  rudder.write(rudder_output);
+
+  // Save current heading error and time
+  heading_prev = heading;
+  previousMillis_PD = currentMillis_PD;
+
 }
