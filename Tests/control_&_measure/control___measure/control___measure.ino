@@ -8,8 +8,8 @@
   autonomous mode and pilot mode.
   // Created: BJGW DU PLESSIS
   // Student Number: 18989780
-  // Modified: 2019/09/04
-  // Version: 0.7
+  // Modified: 2019/09/05
+  // Version: 0.8
 */
 
 #include "Arduino.h"
@@ -116,11 +116,11 @@ double headingrate_error_gyro; // Gyro error
 double rudder_output;          // Rudder control input signal
 
 // Guidance P Controller Variables
-int Kp_guidance = 0.6;         // P Gain
 float psi_track;               // Angle between North and longitudinal axis of aircraft
 double cross_track_y;          // Current cross track y
 double cross_track_ref;        // Cross track reference y
 int32_t gui_ref;               // Reference input signal for Heading controller
+// int Kp_guidance = 0.1;         // P Gain
 
 // Location GPS Coordinates (Lat,Long) * 10,000,000
 NeoGPS::Location_t engineering_1( -339285917L, 188661000L);         // Near Engineering office at bridge
@@ -215,7 +215,7 @@ void loop() {
   //| Update Control Loop:
 
   // Set Heading Reference [Guidance Controller]
-  control_guidance(90, gps_lat, gps_long,engineering_2, engineering_1, 5);  //    int32_t control_guidance(current_lat, current_lon, destination, source_point, spiral_radius (m))
+  control_guidance(gps_lat, gps_long, engineering_2, engineering_1, 5); //    int32_t control_guidance(current_lat, current_lon, destination, source_point, spiral_radius (m))
 
   switch (flight_phase)
   {
@@ -240,7 +240,6 @@ void loop() {
 
   //| Save Measurements:
   update_SD("Stable_Flight_test.txt");
-
 
 }
 
@@ -417,7 +416,6 @@ void control_airspeed(float airspeed, int32_t alt) {
   previousMillis_PID = currentMillis_PID;
 
   // Serial.println(elevator_output);
-
 }
 
 
@@ -470,30 +468,10 @@ void control_heading(int32_t heading, int32_t ref, float g_z) {
   previousMillis_PD = currentMillis_PD;
 
   //Serial.println(rudder_output);
-  //Serial.println(heading);
-  //Serial.println(heading_current_err);
-
 }
 
 // Guidance P CONTROLLER
-void control_guidance(int32_t heading, int32_t latitude, int32_t longitude, NeoGPS::Location_t airport, NeoGPS::Location_t release_point, int spiral_radius) {
-
-  // Convert Lat and Long from Decimal degrees to DMS
-  // Aircraft coordinates in DMS
-//  int D_cur_long = longitude / 10000000;
-//  float M_cur_long = abs((float)(longitude / 10000000.0) - D_cur_long) * 60;
-//  float S_cur_long = abs(M_cur_long - (int)M_cur_long) * 60;
-//  int D_cur_lat = latitude / 10000000;
-//  float M_cur_lat = abs((float)(latitude  / 10000000.0) - D_cur_lat) * 60;
-//  float S_cur_lat = abs(M_cur_lat - (int)M_cur_lat) * 60;
-//
-//  // SRC position coordinates in DMS
-//  int D_src_long = release_point._lon / 10000000;
-//  float M_src_long = abs((float)(release_point._lon / 10000000.0) - D_src_long) * 60;
-//  float S_src_long = abs(M_src_long - (int)M_src_long) * 60;
-//  int D_src_lat = release_point._lat / 10000000;
-//  float M_src_lat = abs((float)(release_point._lat / 10000000.0) - D_src_lat) * 60;
-//  float S_src_lat = abs(M_src_lat - (int)M_src_lat) * 60;
+void control_guidance(int32_t latitude, int32_t longitude, NeoGPS::Location_t airport, NeoGPS::Location_t release_point, int spiral_radius) {
 
   // Distance between aircraft and airport airspace center
   float R = fix.location.DistanceKm(airport);     // Radius between aircraft and airport center point (km)
@@ -527,19 +505,13 @@ void control_guidance(int32_t heading, int32_t latitude, int32_t longitude, NeoG
     psi_track = release_point.BearingToDegrees(airport);
 
     // Calculate longitudinal and lateral difference in meters respectively (m)
-//    float long_diff_1 = (D_cur_long - D_src_long) * (111200) + (M_cur_long - M_src_long) * (1853) + (S_cur_long - S_src_long)* (30.9);
-//    float lat_diff_1 = (D_cur_lat - D_src_lat) * 111200 + (M_cur_lat - M_src_lat) * 1853 + (S_cur_lat - S_src_lat) * 30.9;
-//
-//    // Compute y cross track error (m)
-float lat_diff_1 = ((latitude-release_point._lat)/10000000.0)*111320;
-float long_diff_1 = ((longitude-release_point._lon)/10000000.0)*111320;
+    float lat_diff_1 = ((latitude - release_point._lat) / 10000000.0) * 111320;
+    float long_diff_1 = ((longitude - release_point._lon) / 10000000.0) * 111320;
+
+    // Compute y cross track error (m)
     cross_track_y = -sin(psi_track * PI / (180)) * (long_diff_1) + cos(psi_track * PI / (180)) * (lat_diff_1);
-  
-      //long ang_dist = 2*asin(sqrt(pow(sin((latitude-release_point._lat)*PI/(2*180)),2))+cos(release_point._lat*180/PI)*+cos(latitude*180/PI)*pow(sin((longitude-release_point._lon)*PI/(2*180)),2));
-      //double d13 = fix.location.DistanceKm(release_point)*1000;
-      //cross_track_y = asin(sin(d13*PI/180)*sin((double)(heading-psi_track)*PI/180));
-      
-      Serial.println(cross_track_y);
+
+    //Serial.println(cross_track_y);
 
   }
 
@@ -547,9 +519,7 @@ float long_diff_1 = ((longitude-release_point._lon)/10000000.0)*111320;
   gui_ref = (cross_track_ref - cross_track_y) * (0.1) + psi_track;   //P Gain = 0.1
 
   //Serial.println(R*1000);
-  
-  
-  
+
 }
 
 // Calculate PWM Pulse Width:
