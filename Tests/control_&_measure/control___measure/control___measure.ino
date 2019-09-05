@@ -1,15 +1,15 @@
 /*
   Arduino NANO: Autonomous Glider Controller
   This code measures three inputs from the analog sensor pins. Namely, GPS data, IMU data, Pitot Tube Airspeed data
-  All of the measuerd data is stored in the Stable_Flight_test.txt file found on the SD card. Airpeed and heading controllers are designed,
-  tested and optimized in MATLAB. These PID and PD controllers respectively are added in the loop to glide the glider from a high altitude
-  weather balloon release to a desired landing field GPS-coordinate. PWM output signals with different duty cycles are generated
-  and fed back to the elevator and rudder to keep the glider stable and on track. The controller can be switched with the OH SHIT SWITCH between
+  All of the measuerd data is stored in the Stable_Flight_test.txt file found on the SD card. Airpeed, heading and guidance controllers were designed,
+  tested and optimized in MATLAB. These PID, PD and P controllers respectively are added in the loop to autonomously navigate the glider from a high altitude
+  weather balloon release to a desired destination GPS-coordinate. PWM output signals with different duty cycles are generated
+  and fed back to the elevator and rudder to keep the glider y track error zero and the heading towards the destination. The controller can be switched with the OH SHIT SWITCH between
   autonomous mode and pilot mode.
   // Created: BJGW DU PLESSIS
   // Student Number: 18989780
-  // Modified: 2019/08/21
-  // Version: 0.6
+  // Modified: 2019/09/04
+  // Version: 0.7
 */
 
 #include "Arduino.h"
@@ -27,18 +27,37 @@
 
 #define RAD_to_DEG (180 / PI)  // Convert from radians to degrees
 #define DEG_to_RAD (PI / 180)  // Convert from degrees to radians
-#define DEG_to_PWM (13.4)      // Convert actuator control input from degrees to a PWM width (us)
+#define DEG_to_PWM_r (13.33)   // Convert rudder control input from degrees to a PWM width (us/deg)
+#define DEG_to_PWM_e (26.67)   // Convert elevator control input from degrees to a PWM width (us/deg)
 
 // IMU Sensor Objects:
 LSM6 imu;                 // Gyro Object
 LPS ps;                   // Pressure Sensor Object
-// #define g_z_offset -5.52       // Gyroscope Z axis offset(dps)
-// #define altimeter_setting_mbar 1019.1   // Stellenbosch QNH (mbar)
+// #define g_z_offset -3.8746      // Gyroscope Z axis offset(dps)
+// #define altimeter_setting_mbar 1012.9   // Stellenbosch QNH (mbar)
 
 // Gyroscope Variables (LSM6DS33)
+// IMU MODULE
 unsigned long previousMillis_imu = 0;   // Store last time imu was updated
+// Accelerometer Variables (LSM6DS33)
+float a_x;       // Accelerometer X axis reading (g)
+float a_y;       // Accelerometer Y axis reading (g)
+float a_z;       // Accelerometer Z axis reading (g)
+// float a_conversion_factor = 0.061;  // Conversion Factor for default full scale setting +/- 2 g
+
+// Gyroscope Variables (LSM6DS33)
+float g_x;       // Gyroscope X axis reading (dps)
+float g_y;       // Gyroscope Y axis reading (dps)
 float g_z;       // Gyroscope Z axis reading (dps)
+float f_g_z;     // Complementary Filtered Gyroscope Z axis reading (dps)
 // float g_conversion_factor = 8.75;  // Conversion Factor for default full scale setting +/- 245 dps
+
+// Aircraft ROTATIONS
+float a_pitch;   // Non filtered pitch derived from acceleration values (degrees)
+float a_roll;    // Non filtered roll derived from acceleration values  (degrees)
+unsigned long gyro_integration_timer_start = millis();
+float f_pitch = a_pitch;   // Filtered pitch (degrees/rad)
+float f_roll = a_roll;    // Filtered roll (degrees/rad)
 
 // Pressure Sensor Variables (LPS25H MEMS)
 float pressure;     // Pressure reading (mbar)
@@ -59,16 +78,16 @@ NMEAGPS gps;           // The NMEAGPS object:
 gps_fix fix;           // Data placeholder
 
 // Airspeed Variables:
-float current_airspeed;                   // Current Airspeed (km/h)
+float current_airspeed;                      // Current Airspeed (m/s)
 byte buffer_airspeed[16];                    // Airspeed Sensor 16 Byte Buffer
 unsigned long previousMillis_airspeed = 0;   // Store last time airspeed was updated
-// const long interval_airspeed = 150;          // Interval at which to update airspeed (milliseconds)
+// const long interval_airspeed = 150;       // Interval at which to update airspeed (milliseconds)
 
 // SD Card Object
 SdFat sd;
 
 // Measurements File Object
-// File Format: [hour, minute, second, GPS Altitude (m), IMU Altitude (m), Current Airspeed (m/s), Latitude (°), Longitude (°), GPS Heading (°), Number of Satellites connected, g_z (dps)]
+// File Format: [hour, minute, second, flight_phase, GPS Altitude (m), IMU Altitude (m), Current Airspeed (m/s), Latitude (°), Longitude (°), GPS Heading (°), Heading_ref, cross_track_y,  pitch (°), roll(°), g_z (dps) , elevator_output, rudder_output, Number of Satellites connected]
 File file;
 
 // Airspeed PID Controller Variables
@@ -82,7 +101,7 @@ double v_error_derivative;   // Airspeed error derivative
 int Kp_airspeed = 1;         // P Gain
 int Ki_airspeed = 0.3;       // I Gain
 int Kd_airspeed = 2;         // D Gain
-double elevator_output;      // Elevator output control input signal
+double elevator_output;      // Elevator control input signal
 
 // Heading PD Controller Variables
 unsigned long currentMillis_PD, previousMillis_PD  = 0;   // Store time elapsed for PD controller
@@ -92,20 +111,44 @@ float heading_current_err;     // Shortest turn angle error
 float heading_prev = 0;        // Store previous heading error for derivative calculation
 double heading_derivative;     // Gyro error derivative
 double headingrate_error_gyro; // Gyro error
-int Kp_heading = 0.6;          // P Gain
-int Kd_heading = 0.6 ;         // Gyro D Gain
-double rudder_output;          // Elevator output control input signal
+//int Kp_heading = 0.6;          // P Gain
+//int Kd_heading = 0.6;          // Gyro D Gain
+double rudder_output;          // Rudder control input signal
+
+// Guidance P Controller Variables
+int Kp_guidance = 0.6;         // P Gain
+float psi_track;               // Angle between North and longitudinal axis of aircraft
+double cross_track_y;          // Current cross track y
+double cross_track_ref;        // Cross track reference y
+int32_t gui_ref;               // Reference input signal for Heading controller
+
+// Location GPS Coordinates (Lat,Long) * 10,000,000
+NeoGPS::Location_t engineering_1( -339285917L, 188661000L);         // Near Engineering office at bridge
+NeoGPS::Location_t engineering_2( -339289306L, 188670750L);         // Near Engineering office at street
+//NeoGPS::Location_t coetzenburg_airport( -339396722L, 188752611L );    // Coetzenburg Cricket Field
+//NeoGPS::Location_t coetzenburg_rp( -339394111L, 188779555L );         // Coetzenburg Cricket Field
+//NeoGPS::Location_t flat( -339318823L, 188568723L );                 // Flat
+//NeoGPS::Location_t paarl( -337704640L, 189576952L );                // Paarl
+NeoGPS::Location_t rp = fix.location;                                 // Release point when switched to autonomous mode
+
 
 // Servo Objects for PWM Signal Generation
 ServoTimer2 rudder;
 ServoTimer2 elevator;
 
+// PWM Signal Measure
+int flight_phase = 0;   // Different flight phase case statements
+volatile int OH_SHIT_SWITCH_In = 0; // Oh shit switch PWM Value set to neutral PWM microseconds value TODO; Check neutral value
+volatile unsigned long pwm_prev_time = 0; // Previous time of pwm value
+volatile boolean b_OH_SHIT_SWITCH_Signal = false; // Set in the interrupt and read in the loop
+int pwm_filter_counter = 0;     // Counter counts from 0 to 41 in order to get average pwm measured value
+long pwm_current = 0;           // Variable that holds sum of pwm measurements
 
 
 //|| Setup Code:
 void setup() {
 
-  //| Setup Transmission Data Rates:
+  //| Setup Transmission Data Rates
   Serial.begin(9600);     // Main Baud Rate
   gpsPort.begin(9600);    // Gps Baud Rate
   Wire.begin();           // Join i2c Bus for Airspeed Measurements
@@ -117,7 +160,7 @@ void setup() {
   ps.init();
   ps.enableDefault();
 
-  //| Setup Save Measurements to SD Card:
+  //| Setup Save Measurements to SD Card
   pinMode(13, OUTPUT);
   sd.remove("Stable_Flight_test.txt");  // Clear Current File
 
@@ -126,31 +169,77 @@ void setup() {
   elevator.attach(A2);   // Elevator PWM  Output. Pin A2
   pinMode(4, OUTPUT);    // Sets digital pin 4 as Signal Select switch output signal
 
+  // OH SHIT SWITCH
+  attachInterrupt(digitalPinToInterrupt(3), pwm_calc, CHANGE);  // Create interrupt for OH SHIT SWITCH
 
-  Serial.println("Setup Complete");
-
-
+  //Serial.println("Setup Complete");
 
 }
 //|| Main Control Loop:
 void loop() {
 
-  // MUX SIGNAL SELECT
-  digitalWrite(4, LOW); // Signal select LOW = ARDUINO PWM Input; HIGH = ONBOARD RECEIVER PWM Input   *******************NB*************** For Measurments set to HIGH
+  //| Check if OH SHIT SWITCH is enabled.
+  if (b_OH_SHIT_SWITCH_Signal)
+  {
+    if ( OH_SHIT_SWITCH_In >= 1000 &&  OH_SHIT_SWITCH_In <= 3000) {
 
-  //| Take Measurements:
+      pwm_current = pwm_current + OH_SHIT_SWITCH_In;
+      pwm_filter_counter += 1;
+
+      if (pwm_filter_counter >= 41) {
+        pwm_filter_counter = 0;
+        if (pwm_current / 41 <= 1500) {
+          if (flight_phase == 0) {
+            if (fix.valid.location) {
+              NeoGPS::Location_t rp = fix.location;  // Release point after switched to autonomous mode
+            }
+          }
+          flight_phase = 1;
+          pwm_current = 0;
+        }
+
+        else {
+          flight_phase = 0;
+          pwm_current = 0;
+        }
+      }
+    }
+    b_OH_SHIT_SWITCH_Signal = false; // Set switch back to false to recalculate next PWM duaration
+  }
+
+  //| Update Measurements:
   update_airspeed();
   update_imu();
   update_gps();
 
+  //| Update Control Loop:
+
+  // Set Heading Reference [Guidance Controller]
+  control_guidance(90, gps_lat, gps_long,engineering_2, engineering_1, 5);  //    int32_t control_guidance(current_lat, current_lon, destination, source_point, spiral_radius (m))
+
+  switch (flight_phase)
+  {
+
+    case 0: // Pilot mode activated
+      digitalWrite(4, HIGH); // Signal select HIGH = ONBOARD RECEIVER PWM Input;
+      break;
+
+    case 1: // Autonoumous mode activated
+
+      digitalWrite(4, LOW); // Signal select LOW = ARDUINO PWM Input; HIGH = ONBOARD RECEIVER PWM Input
+
+      // Elevator Input [Airspeed Controller]
+      control_airspeed(current_airspeed, gps_altitude);  // (current_airspeed, altitude (m))
+
+      // Rudder Input [Heading Controller]
+      //control_heading(gps_heading, gui_ref, f_g_z); // (current_heading_ heading_ref, g_z)
+      control_heading(50, 110, f_g_z); // (current_heading_ heading_ref, g_z)
+      break;
+
+  }
+
   //| Save Measurements:
   update_SD("Stable_Flight_test.txt");
-
-  //control_airspeed(14, 2100);
-
- control_heading(0, 350, 0);
-
-
 
 
 }
@@ -174,6 +263,7 @@ void update_airspeed() {
     }
     current_airspeed = (buffer_airspeed[2] * 256 + buffer_airspeed[3]) / 3.6;    // Airspeed: MSB = Byte 2 & LSB = Byte 3  (1 km/h increments)
   }
+  //Serial.println(current_airspeed);
 }
 
 // IMU Data Request Loop:
@@ -181,12 +271,33 @@ void update_imu() {
 
   imu.read();
 
-  // Read Gyroscope and compensate for Gyro offset (dps)
-  g_z = ((imu.g.z * 8.75) / 1000) + 5.52;
+  // Read Accelerometer (g)
+  a_x =  (imu.a.x * 0.061) / 1000;
+  a_y =  (imu.a.y * 0.061) / 1000;
+  a_z =  (imu.a.z * 0.061) / 1000;
+
+  // Read Gyroscope and compensate for Gyro offset (dps) TODO: Filter g_z
+  g_x = ((imu.g.x * 8.75) / 1000) - 2.46;
+  g_y = ((imu.g.y * 8.75) / 1000) - 1.71;
+  g_z = ((imu.g.z * 8.75) / 1000) + 3.8746;
+  f_g_z = (1 - 0.1) * (f_g_z) + 0.1 * g_z;
+
+  // Calculate non filtered pitch, roll and yaw (degrees)
+  a_pitch = atan2(a_x, sqrt(a_y * a_y + a_z * a_z)) * RAD_to_DEG;
+  a_roll = atan2(a_y, sqrt(a_x * a_x + a_z * a_z)) * RAD_to_DEG;
+
+  // Complementary Filter to surpress noise in accelerometer and gyroscope data (degrees)
+  unsigned long dt = (millis() - gyro_integration_timer_start) / 1000;
+  f_pitch = (1 - 0.1) * (f_pitch + dt * g_x) + 0.1 * a_pitch;
+  f_roll = (1 - 0.1) * (f_roll + dt * g_y) + 0.1 * a_roll;
+
+  // Start integration timer for gyro
+  gyro_integration_timer_start = 0;
+  gyro_integration_timer_start = millis();
 
   // Read Pressure and determine Altitude
   pressure = ps.readPressureMillibars();
-  imu_altitude = ps.pressureToAltitudeMeters(pressure, 1030);
+  imu_altitude = ps.pressureToAltitudeMeters(pressure, 1012.9);
 
 }
 
@@ -206,6 +317,8 @@ void update_gps() {
     if (fix.valid.location) {
       gps_lat = fix.latitudeL();
       gps_long = fix.longitudeL();
+      //Serial.println(gps_lat);
+      //Serial.println(gps_long);
     }
     if (fix.valid.heading) {
       gps_heading = (fix.heading());
@@ -226,22 +339,40 @@ void update_SD(char filename[]) {
     file.print(",");
     file.print(gps_s);
     file.print(",");
+    file.print(flight_phase);
+    file.print(",");
     file.print(gps_altitude);
     file.print(",");
-    file.print(imu_altitude);
-    file.print(",");
+    // file.print(imu_altitude);
+    // file.print(",");
     file.print(current_airspeed);
     file.print(",");
-    file.print(gps_lat, 6);
+    file.print(gps_lat);
     file.print(",");
-    file.print(gps_long, 6);
+    file.print(gps_long);
+    file.print(",");
+    file.print(rp._lon);
+    file.print(",");
+    file.print(rp._lat);
     file.print(",");
     file.print(gps_heading);
     file.print(",");
-    file.print(no_satellites);
+    file.print(gui_ref);
     file.print(",");
-    file.print(g_z);
+    file.print(cross_track_y);
     file.print(",");
+    file.print(f_pitch);
+    file.print(",");
+    file.print(f_roll);
+    file.print(",");
+    file.print(f_g_z);
+    file.print(",");
+    file.print(elevator_output);
+    file.print(",");
+    file.print(rudder_output);
+    file.print(",");
+    // file.print(no_satellites);
+    // file.print(",");
     file.println();
     file.close();
   }
@@ -258,56 +389,25 @@ void control_airspeed(float airspeed, int32_t alt) {
   if (alt < 1000) {
     v_ref = 10.97;
   }
-  else if (alt >= 1000 && alt < 2000) {
-    v_ref = 11.25;
-  }
-  else if (alt > 2000 && alt < 3000) {
-    v_ref = 11.8;
-  }
-  else if (alt > 3000 && alt < 4000) {
-    v_ref = 12.5;
-  }
-  else if (alt > 4000 && alt < 5000) {
-    v_ref = 13.4;
-  }
-  else if (alt > 5000 && alt < 6000) {
-    v_ref = 14.5;
-  }
-  else if (alt > 6000 && alt < 7000) {
-    v_ref = 16.0;
-  }
-  else if (alt > 7000 && alt < 8000) {
-    v_ref = 18.0;
-  }
-  else if (alt > 8000 && alt < 9000) {
-    v_ref = 21.0;
-  }
-  else if (alt > 9000 && alt < 10000) {
-    v_ref = 26.2;
-  }
   else {
-    v_ref = 38.2;
+    v_ref = 11.25;
   }
 
   // Determine Airspeed error
   v_current_err = v_ref - airspeed;
-
-  //Serial.println(v_current_err);
 
   // Determine Integral of error
   v_error_integral += v_current_err * elapsedMillis_PID;
 
   // Determine Derivative of error
   v_error_derivative = (v_current_err - v_prev_err) / elapsedMillis_PID;
-  
-  // Determine PWM elevator output signal width
-  elevator_output = 1508 - (DEG_to_PWM) * (Kp_airspeed * v_current_err + Ki_airspeed * v_error_integral + Kd_airspeed * v_error_derivative);
 
-  Serial.println(Kp_airspeed * v_current_err + Ki_airspeed * v_error_integral + Kd_airspeed * v_error_derivative);
+  // Determine PWM elevator output signal width
+  elevator_output = 1500 + (DEG_to_PWM_e) * (Kp_airspeed * v_current_err + Ki_airspeed * v_error_integral + Kd_airspeed * v_error_derivative);
 
   // Servo Saturation (+- 10 Degrees)
-  if (elevator_output > (1508 + DEG_to_PWM * 10)) elevator_output = 1508 + DEG_to_PWM * 10;
-  if (elevator_output < (1508 - DEG_to_PWM * 10)) elevator_output = 1508 - DEG_to_PWM * 10;
+  if (elevator_output > (1500 + DEG_to_PWM_e * 10)) elevator_output = 1500 + DEG_to_PWM_e * 10;
+  if (elevator_output < (1500 - DEG_to_PWM_e * 10)) elevator_output = 1500 - DEG_to_PWM_e * 10;
 
   // Send PWM signal width to elevator servo
   elevator.write(elevator_output);
@@ -315,6 +415,8 @@ void control_airspeed(float airspeed, int32_t alt) {
   // Save current error and time
   v_prev_err = v_current_err;
   previousMillis_PID = currentMillis_PID;
+
+  // Serial.println(elevator_output);
 
 }
 
@@ -349,24 +451,125 @@ void control_heading(int32_t heading, int32_t ref, float g_z) {
 
   // Determine Derivative of error
   heading_derivative = (heading - heading_prev) / elapsedMillis_PD;
-  
+
   // Determine Gyro error
   headingrate_error_gyro = heading_derivative - g_z;
 
   // Determine PWM rudder output signal width
-  rudder_output = 1508 - (DEG_to_PWM) * (Kp_heading * heading_current_err +  Kd_heading *  headingrate_error_gyro);
+  rudder_output = 1500 + (DEG_to_PWM_r) * (0.6 * heading_current_err + 0.6 *  headingrate_error_gyro);   //PD Gain each = 0.6
 
-  //Serial.println(heading_derivative);
-
-  // Servo Saturation (+- 10 Degrees)
-  if (rudder_output > (1508 + DEG_to_PWM * 10)) rudder_output = 1508 + DEG_to_PWM * 10;
-  if (rudder_output < (1508 - DEG_to_PWM * 10)) rudder_output = 1508 - DEG_to_PWM * 10;
+  // Servo Saturation (+- 15 Degrees)
+  if (rudder_output > (1500 + DEG_to_PWM_r * 15)) rudder_output = 1500 + DEG_to_PWM_r * 15;
+  if (rudder_output < (1500 - DEG_to_PWM_r * 15)) rudder_output = 1500 - DEG_to_PWM_r * 15;
 
   // Send PWM signal width to rudder servo
   rudder.write(rudder_output);
 
-  // Save current heading error and time
+  // Store current heading error and time
   heading_prev = heading;
   previousMillis_PD = currentMillis_PD;
 
+  //Serial.println(rudder_output);
+  //Serial.println(heading);
+  //Serial.println(heading_current_err);
+
+}
+
+// Guidance P CONTROLLER
+void control_guidance(int32_t heading, int32_t latitude, int32_t longitude, NeoGPS::Location_t airport, NeoGPS::Location_t release_point, int spiral_radius) {
+
+  // Convert Lat and Long from Decimal degrees to DMS
+  // Aircraft coordinates in DMS
+//  int D_cur_long = longitude / 10000000;
+//  float M_cur_long = abs((float)(longitude / 10000000.0) - D_cur_long) * 60;
+//  float S_cur_long = abs(M_cur_long - (int)M_cur_long) * 60;
+//  int D_cur_lat = latitude / 10000000;
+//  float M_cur_lat = abs((float)(latitude  / 10000000.0) - D_cur_lat) * 60;
+//  float S_cur_lat = abs(M_cur_lat - (int)M_cur_lat) * 60;
+//
+//  // SRC position coordinates in DMS
+//  int D_src_long = release_point._lon / 10000000;
+//  float M_src_long = abs((float)(release_point._lon / 10000000.0) - D_src_long) * 60;
+//  float S_src_long = abs(M_src_long - (int)M_src_long) * 60;
+//  int D_src_lat = release_point._lat / 10000000;
+//  float M_src_lat = abs((float)(release_point._lat / 10000000.0) - D_src_lat) * 60;
+//  float S_src_lat = abs(M_src_lat - (int)M_src_lat) * 60;
+
+  // Distance between aircraft and airport airspace center
+  float R = fix.location.DistanceKm(airport);     // Radius between aircraft and airport center point (km)
+
+  // If inside Airport Airspace
+  if ( R * 1000 < spiral_radius + 5 ) {
+
+    //Serial.println("Inside Airspace");
+    cross_track_ref = spiral_radius;
+
+    psi_track = airport.BearingToDegrees(fix.location); // Calculate psi_track error for current orientation
+    psi_track = psi_track - 90;
+
+    // Compute y cross track error (m)
+    cross_track_y = R * 1000;
+
+    // If outside spiral circle
+    if (cross_track_y > cross_track_ref) {
+      cross_track_y = cross_track_y;
+    } else if (cross_track_y < cross_track_ref) {
+      cross_track_y = -cross_track_y;
+    }
+
+
+    // Fly to Airport Airspace from balloon release point
+  } else {
+
+    //Serial.println("Outside Airspace");
+    cross_track_ref = 0;
+
+    psi_track = release_point.BearingToDegrees(airport);
+
+    // Calculate longitudinal and lateral difference in meters respectively (m)
+//    float long_diff_1 = (D_cur_long - D_src_long) * (111200) + (M_cur_long - M_src_long) * (1853) + (S_cur_long - S_src_long)* (30.9);
+//    float lat_diff_1 = (D_cur_lat - D_src_lat) * 111200 + (M_cur_lat - M_src_lat) * 1853 + (S_cur_lat - S_src_lat) * 30.9;
+//
+//    // Compute y cross track error (m)
+float lat_diff_1 = ((latitude-release_point._lat)/10000000.0)*111320;
+float long_diff_1 = ((longitude-release_point._lon)/10000000.0)*111320;
+    cross_track_y = -sin(psi_track * PI / (180)) * (long_diff_1) + cos(psi_track * PI / (180)) * (lat_diff_1);
+  
+      //long ang_dist = 2*asin(sqrt(pow(sin((latitude-release_point._lat)*PI/(2*180)),2))+cos(release_point._lat*180/PI)*+cos(latitude*180/PI)*pow(sin((longitude-release_point._lon)*PI/(2*180)),2));
+      //double d13 = fix.location.DistanceKm(release_point)*1000;
+      //cross_track_y = asin(sin(d13*PI/180)*sin((double)(heading-psi_track)*PI/180));
+      
+      Serial.println(cross_track_y);
+
+  }
+
+  // Return reference input signal for heading controller
+  gui_ref = (cross_track_ref - cross_track_y) * (0.1) + psi_track;   //P Gain = 0.1
+
+  //Serial.println(R*1000);
+  
+  
+  
+}
+
+// Calculate PWM Pulse Width:
+void pwm_calc()
+{
+  // If the pin is high, its the start of an interrupt
+  if (digitalRead(3) == HIGH)
+  {
+    // get the time using micros
+    pwm_prev_time = micros();
+  }
+  else
+  {
+    // If the pin is low, its the falling edge of the pulse so now we can calculate the pulse duration by subtracting the
+    // previous time pwm_prev_time from the current time returned by micros()
+    if (pwm_prev_time && (b_OH_SHIT_SWITCH_Signal == false))
+    {
+      OH_SHIT_SWITCH_In = (int)(micros() - pwm_prev_time);
+      pwm_prev_time = 0;
+      b_OH_SHIT_SWITCH_Signal = true;
+    }
+  }
 }
