@@ -21,7 +21,7 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 - Number of satellites connected
 
 #### Save all measurements to SD Card
-- OH SHIT SWITCH saves measurements
+- SWITCH 2 saves measurements
 
 #### Controller Simulation
 - Dynamic Glider plant model in MATLAB
@@ -29,7 +29,7 @@ Autonomous Glider Controller for a RC Glider. The [autonomous_glider_controller_
 - PD Heading error controller
 - P Guidance controller
 
-### TODO:
+### Also finished:
 
 Airspeed and Heading Controller on Arduino 
 
@@ -39,13 +39,11 @@ Control Loop
 
 PCB
 
-OH SHIT SWITCH, to switch between controller and pilot
+SWITCH 2, to switch between controller and pilot
 
-Design gain values with Root Locus method
+Design controller gain values with Root Locus method
 
-Real time Rudder and Elevator PWM Measurements with Labada Box
-
-Communication
+Communication RF link
 
 
 
